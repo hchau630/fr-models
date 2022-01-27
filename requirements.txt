@@ -1,0 +1,7 @@
+numpy
+matplotlib
+scipy
+torch==1.10.1+cu113
+torchdiffeq
+-f https://download.pytorch.org/whl/cu113/torch_stable.html
+-e .
