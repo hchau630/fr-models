@@ -9,6 +9,9 @@ setup(
         'matplotlib',
         'scipy',
         'torch',
-        'torchdiffeq',
-    ]
+        # 'torchdiffeq',
+    ],
+    extras_require={
+        'test': ['pytest'],
+    }
 )
