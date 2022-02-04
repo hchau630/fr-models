@@ -56,7 +56,7 @@ def dist(x, y, w_dims, period=2*torch.pi):
     if len(w_dims) == 0:
         return torch.abs(x-y)
     
-    _x, _y = torch.broadcast_tensors(_torch.atleast_0d(x), _torch.atleast_0d(x))
+    _x, _y = torch.broadcast_tensors(_torch.atleast_0d(x), _torch.atleast_0d(y))
     w_dims = torch.tensor(w_dims)
     period = torch.atleast_1d(torch.tensor(period))
     assert w_dims.ndim == period.ndim == 1
