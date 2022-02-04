@@ -10,6 +10,7 @@ setup(
         'scipy',
         'torch',
         # 'torchdiffeq',
+        'hyc-utils',
     ],
     extras_require={
         'test': ['pytest'],

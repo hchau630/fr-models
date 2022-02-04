@@ -5,14 +5,14 @@ from torchdiffeq import odeint
 import numpy as np
 import torch
 
-from fr_models import utils
+from . import gridtools
 
 class NumericalModel(abc.ABC, torch.nn.Module):
-    def __init__(self, W, tau=1.0):
+    def __init__(self, W):
         assert W.ndim == 2
         super().__init__()
         
-        self.tau = tau
+        self.tau = 1.0  # always use tau = 1.0 for convenience
         self.N = W.shape[0]
         self.W = torch.nn.Parameter(W)
         
@@ -60,27 +60,28 @@ class NumericalModel(abc.ABC, torch.nn.Module):
         return r
         
 class MultiDimModel(NumericalModel):
-    def __init__(self, W, *args, **kwargs):
+    def __init__(self, W, **kwargs):
         assert W.ndim % 2 == 0
         
         shape = W.shape[:W.ndim // 2]
         _W = W.reshape(np.prod(shape), np.prod(shape))
         
-        super().__init__(_W, *args, **kwargs)
+        super().__init__(_W, **kwargs)
         
         self.shape = shape
         self.ndim = W.ndim // 2
         self.W_expanded = W
         
-    def foward(self, h, r0, t, **kwargs):
-        r0 = r0.reshape(-1)
+    def forward(self, h, r0, t, **kwargs):
+        if r0.ndim != 0:
+            r0 = r0.reshape(-1)
         
         if not callable(h):
             _h = h.reshape(-1)
         else:
             _h = lambda t: h(t).reshape(-1)
-        
-        r = super().foward(_h, r0, t) # (L, N) or (N)
+
+        r = super().forward(_h, r0, t) # (L, N) or (N)
 
         if t.ndim == 0:
             r = r.reshape(*self.shape)
@@ -96,7 +97,7 @@ class TrivialVBModel(MultiDimModel):
     with the usual metric. The fibre F is a vector space.
     This should be an abstract yet specific enough base class for any reasonable models of the cortex.
     """
-    def __init__(self, W, F_dim, w_dims, *args, **kwargs):
+    def __init__(self, W, F_dim, w_dims, **kwargs):
         """
         Args:
           - W: The weight tensor, with the first F_dim dimensions corresponding to the fiber space F, 
@@ -105,7 +106,7 @@ class TrivialVBModel(MultiDimModel):
           - w_dims: a list of integers denoting the dimensions (within base space B) which are 'wrapped',
                     i.e. are S^1.
         """
-        super().__init__(W, *args, **kwargs)
+        super().__init__(W, **kwargs)
         self.F_dim = F_dim
         self.B_dim = self.ndim - F_dim
         assert self.F_dim >= 0 and self.B_dim >= 0
@@ -116,7 +117,7 @@ class TrivialVBModel(MultiDimModel):
         self.w_dims = w_dims
         assert all([w_dim < self.B_dim for w_dim in self.w_dims])
         
-    def get_h(amplitude, F_idx, B_idx=None, device='cpu'):
+    def get_h(self, amplitude, F_idx, B_idx=None, device='cpu'):
         """
         Returns an input vector h where the neurons with F index F_idx and B index B_idx
         is are given input with input strength amplitude.
@@ -130,30 +131,31 @@ class TrivialVBModel(MultiDimModel):
           - B_idx: Similar to F_idx, but if None, then B_idx will be the index of the
                    neuron at the origin of the B space.
         """
-        h = np.zeros(self.shape, device=device)
+        h = torch.zeros(self.shape, device=device)
         
+        amplitude = torch.tensor(amplitude, device=device, dtype=torch.float)
         F_idx = torch.tensor(F_idx, device=device)
         if B_idx is None:
-            B_idx = utils.get_mids(self.B_shape, w_dims=self.w_dims)
+            B_idx = gridtools.get_mids(self.B_shape, w_dims=self.w_dims)
         B_idx = torch.tensor(B_idx, device=device)
-        F_idx = torch.atleast_2D(F_idx)
-        B_idx = torch.atleast_2D(B_idx)
+        F_idx = torch.atleast_2d(F_idx)
+        B_idx = torch.atleast_2d(B_idx)
         
         h[(*F_idx.T,*B_idx.T)] = amplitude
         
         return h
     
 class MultiCellModel(TrivialVBModel):
-    def __init__(self, W, *args, **kwargs):
+    def __init__(self, W, w_dims, **kwargs):
         assert W.ndim >= 4
-        super().__init__(W, 1, *args, **kwargs)
+        super().__init__(W, F_dim=1, w_dims=w_dims, **kwargs)
                 
 class FRModel(NumericalModel):
-    def __init__(self, W, f, *args, **kwargs):
+    def __init__(self, W, f, **kwargs):
         """
         User should make sure that f is a function that is compatible with torch.Tensor and not np.ndarray
         """
-        super().__init__(W, *args, **kwargs)
+        super().__init__(W, **kwargs)
         self.f = f
         
     def _drdt(self, t, r, h):
@@ -163,17 +165,22 @@ class MultiCellFRModel(MultiCellModel, FRModel):
     pass
     
 class SSNModel(FRModel):
-    def __init__(self, W, power=2, *args, **kwargs):
-        f = lambda x: torch.clip(x,0,None)**power
-        super().__init__(W, f, *args, **kwargs)
+    def __init__(self, W, power, **kwargs):
+        f = lambda x, power: torch.clip(x,0,None)**power
+        super().__init__(W, f=partial(f, power=power), **kwargs)
+        self.power = power
         
 class MultiCellSSNModel(MultiCellModel, SSNModel):
-    pass
+    def nonlinear_perturbed_model(self, r_star):
+        return PerturbedMultiCellSSNModel(self.W_expanded, r_star=r_star, w_dims=self.w_dims, power=self.power)
+    
+    def linear_perturbed_model(self, r_star):
+        return LinearizedMultiCellSSNModel(self.W_expanded, r_star=r_star, w_dims=self.w_dims)
         
 class LinearizedMultiCellSSNModel(MultiCellFRModel):
-    def __init__(self, W, r_star, *args, **kwargs):
+    def __init__(self, W, r_star, w_dims, **kwargs):
         assert torch.all(r_star >= 0)
-        super().__init__(W, None, *args, **kwargs) # f is defined dynamically
+        super().__init__(W, f=None, w_dims=w_dims, **kwargs) # f is defined dynamically
         self._r_star = torch.nn.Parameter(r_star)
         
     @property
@@ -193,14 +200,14 @@ class LinearizedMultiCellSSNModel(MultiCellFRModel):
     def f(self):
         return lambda x: self.f_prime * x
     
-    def foward(self, delta_h, delta_r0, t, **kwargs):
+    def forward(self, delta_h, delta_r0, t, **kwargs):
         delta_r = super().forward(delta_h, delta_r0, t, **kwargs)
         return delta_r
         
 class PerturbedMultiCellSSNModel(MultiCellSSNModel):
-    def __init__(self, W, r_star, *args, **kwargs):
+    def __init__(self, W, r_star, w_dims, power, **kwargs):
         assert torch.all(r_star >= 0)
-        super().__init__(W, *args, **kwargs)
+        super().__init__(W, w_dims=w_dims, power=power, **kwargs)
         self._r_star = torch.nn.Parameter(r_star)
         
     @property
@@ -213,7 +220,7 @@ class PerturbedMultiCellSSNModel(MultiCellSSNModel):
         r_star = self.r_star.reshape(-1)
         return (r_star**0.5 - self.W @ r_star).reshape(self.shape)
     
-    def foward(self, delta_h, delta_r0, t, **kwargs):
+    def forward(self, delta_h, delta_r0, t, **kwargs):
         if not callable(delta_h):
             h = self.h_star + delta_h
         else:

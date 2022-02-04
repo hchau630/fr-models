@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from . import _torch
-from . import itertools
+import utils
 
 def get_grid_size(Ls, shape, w_dims=[]):
     """
@@ -18,9 +18,11 @@ def get_dxs(Ls, shape, w_dims=[]):
 
 def get_mids(shape, w_dims=[]):
     """
-    returns tuple
+    Returns the index of the center of shape.
+    Raises AssertionError if the center of shape does not coincide with a particular index
     """
     D = len(shape)
+    assert all([shape[d] % 2 == 0 if d in w_dims else shape[d] % 2 == 1 for d in range(D)]) # odd number of neurons for symmetry
     return tuple([shape[d]//2 if d in w_dims else (shape[d]-1)//2 for d in range(D)])
 
 def get_grid(Ls, shape, w_dims=[], device='cpu'):
@@ -52,5 +54,5 @@ def meshgrid(tensors):
     M_afters = np.sum(Ms) - np.cumsum(Ms)
     Ns = [tensor.shape[-1] for tensor in tensors]
     shapes = [[1]*M_befores[i]+sizes[i]+[1]*M_afters[i]+[Ns[i]] for i, tensor in enumerate(tensors)]
-    expanded_tensors = [tensor.reshape(shapes[i]).expand(itertools.flatten_seq(sizes)+[Ns[i]]) for i, tensor in enumerate(tensors)]
+    expanded_tensors = [tensor.reshape(shapes[i]).expand(utils.itertools.flatten_seq(sizes)+[Ns[i]]) for i, tensor in enumerate(tensors)]
     return expanded_tensors

@@ -3,6 +3,8 @@ import functools
 import numpy as np
 import torch
 
+from . import _torch
+
 def wrap(f, w_dims, order=3, period=2*torch.pi):
     """
     f is a function from R^D to R. 
@@ -45,3 +47,34 @@ def wrap(f, w_dims, order=3, period=2*torch.pi):
         return result
 
     return f_wrapped
+
+def dist(x, y, w_dims, period=2*torch.pi):
+    """
+    Returns |y-x| for dimensions not in w_dims and min{|y-x|, period-|y-x|} otherwise.
+    For dimensions in w_dims, x and y must satisfy -period/2 <= x, y <= period/2.
+    """
+    if len(w_dims) == 0:
+        return torch.abs(x-y)
+    
+    _x, _y = torch.broadcast_tensors(_torch.atleast_0d(x), _torch.atleast_0d(x))
+    w_dims = torch.tensor(w_dims)
+    period = torch.atleast_1d(torch.tensor(period))
+    assert w_dims.ndim == period.ndim == 1
+    if len(period) == 1:
+        period = period.expand_as(w_dims)
+    assert w_dims.shape == period.shape
+    
+    z = torch.abs(x - y)
+    D = z.shape[-1]
+    device = z.device
+    
+    w_dims = w_dims.to(device)
+    period = period.to(device)
+    
+    assert torch.all(-period/2 <= _x[...,w_dims]) and torch.all(_x[...,w_dims] <= period/2)
+    assert torch.all(-period/2 <= _y[...,w_dims]) and torch.all(_y[...,w_dims] <= period/2)
+    
+    one = torch.zeros(D, device=device)
+    one[w_dims] = 1.0
+    
+    return torch.minimum(z, one*period - z)

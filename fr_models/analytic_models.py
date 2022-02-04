@@ -5,8 +5,8 @@ import typing
 import numpy as np
 import torch
 
-from fr_models import numerical_models as nmd
-from fr_models import utils
+from . import numerical_models as nmd
+from . import kernels
 
 @dataclasses.dataclass
 class AnalyticModel(abc.ABC):
@@ -32,11 +32,11 @@ class GaussianSSNModel(AnalyticModel):
         self.n = self.W.shape[0] # number of cell types
         self.ndim = self.sigma.shape[-1] # number of spatial/feature dimensions
         cov = torch.diag_embed(self.sigma**2)
-        self.kernel = utils.kernels.K_wg(self.W, cov, w_dims=self.w_dims, order=self.wn_order, period=self.period)
+        self.kernel = kernels.K_wg(self.W, cov, w_dims=self.w_dims, order=self.wn_order, period=self.period)
     
     def numerical_model(self, Ls, shape, **kwargs):
         assert len(Ls) == len(shape) == self.ndim
-        W_discrete = utils.kernels.discretize_K(self.kernel, Ls, shape, w_dims=self.w_dims, **kwargs) # (*shape, *shape, n, n)
+        W_discrete = kernels.discretize_K(self.kernel, Ls, shape, w_dims=self.w_dims, **kwargs) # (*shape, *shape, n, n)
         W_discrete = torch.moveaxis(W_discrete, -2, 0) # (n, *shape, *shape, n)
         W_discrete = torch.moveaxis(W_discrete, -1, 1+self.ndim) # (n, *shape, n, *shape)
         return nmd.MultiCellSSNModel(W_discrete, w_dims=self.w_dims, power=self.power)
