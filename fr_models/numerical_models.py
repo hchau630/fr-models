@@ -53,6 +53,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
             _r0 = r0
             
         drdt = partial(self._drdt, h=_h)
+
         r = odeint(drdt, _r0, _t, **kwargs)
 
         if t.ndim == 0:
@@ -159,7 +160,8 @@ class FRModel(NumericalModel):
         self.f = f
         
     def _drdt(self, t, r, h):
-        return self.f(self.W @ r + h(t)) - r
+        result = self.f(self.W @ r + h(t)) - r
+        return result
     
 class MultiCellFRModel(MultiCellModel, FRModel):
     pass
