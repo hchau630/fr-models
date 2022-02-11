@@ -1,12 +1,30 @@
 #  A module containing functions with pytorch backend that behave like numpy functions
 
 import torch
+from fr_models import gridtools
 
 def linspace(start, end, steps, endpoint=True, **kwargs):
     if endpoint:
         return torch.linspace(start, end, steps, **kwargs)
     else:
         return torch.linspace(start, end, steps+1, **kwargs)[:-1] # exclude endpoint
+    
+def pad(tensor, pad_width, mode='wrap'):
+    if mode != 'wrap':
+        raise NotImplementedError()
+        
+    device = tensor.device
+    indices = gridtools.get_grid(
+        [(-pad_width[i][0],tensor.shape[i]+pad_width[i][1]) for i in range(tensor.ndim)], 
+        method='arange',
+        device=device
+    )
+    indices = torch.moveaxis(indices, -1, 0)
+    for dim in range(len(indices)):
+        indices[dim] = indices[dim] % tensor.shape[dim]
+    result = tensor[tuple(indices)]
+    
+    return result
     
 def tensor(data, **kwargs):
     """
@@ -31,3 +49,9 @@ def tensor(data, **kwargs):
 def atleast_0d(*args):
     result = tuple([arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args])
     return result[0] if len(result) == 1 else result
+
+def isclose(x, y, rtol=1.0e-5, atol=1.0e-8):
+    return torch.abs(x-y) <= atol + rtol * y
+
+def allclose(*args, **kwargs):
+    return torch.all(isclose(*args, **kwargs))

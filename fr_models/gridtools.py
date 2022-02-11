@@ -4,41 +4,138 @@ import torch
 from . import _torch
 import utils
 
-def get_grid_size(Ls, shape, w_dims=[]):
+class Grid(torch.Tensor):
+    def __new__(cls, *args, data=None, require_grads=False, **kwargs):
+        # Reference: https://discuss.pytorch.org/t/subclassing-torch-longtensor/100377/3
+        if data is None:
+            data = get_grid(*args, **kwargs)
+        return torch.Tensor._make_subclass(cls, data, require_grads) 
+    
+    def __init__(self, extents, shape=None, dxs=None, w_dims=None, **kwargs):
+        if w_dims is None:
+            w_dims = []
+
+        self._extents = extents
+        self._dxs = dxs if dxs is not None else get_dxs(extents, shape, w_dims=w_dims)
+        self._dA = np.prod(self._dxs)
+        self._w_dims = w_dims
+    
+    @property
+    def extents(self):
+        return self._extents
+    
+    @property
+    def dxs(self):
+        return self._dxs
+    
+    @property
+    def dA(self):
+        return self._dA
+    
+    @property
+    def w_dims(self):
+        return self._w_dims
+    
+    @property
+    def mids(self):
+        return get_mids(self.shape, w_dims=self.w_dims) # throws AssertionError if grid does not have a point that lies exactly in the middle
+    
+    def slice(self, i):
+        return slice_coord(self, i)
+        
+#     @staticmethod
+#     def meshgrid(grids):
+#         tensors = [grid.points for grid in grids]
+#         new_tensor = torch.stack(meshgrid(tensors),dim=-1)
+#         new_Ls = [L for grid in grids for L in grid.Ls]
+#         new_shape = [n for grid in grids for n in grid.shape]
+        
+#         new_w_dims = []
+#         cum_ndim = 0
+#         for i, grid in enumerate(grids):
+#             new_w_dims += [dim + cum_ndim for dim in grid.w_dims]
+#             cum_ndim += grid.ndim
+            
+#         return Grid(new_Ls, new_shape, w_dims=new_w_dims, points=new_tensor)
+
+def get_dA(*args, **kwargs):
     """
     returns scalar
     """
-    return np.prod(np.array(Ls)/np.array([shape[i] if i in w_dims else shape[i]-1 for i in range(len(shape))]))
+    return np.prod(get_dxs(*args, **kwargs))
 
-def get_dxs(Ls, shape, w_dims=[]):
+def get_dxs(extents, shape, w_dims=None):
     """
-    returns np.ndarray
+    returns list
     """
-    return np.array(Ls)/np.array([shape[i] if i in w_dims else shape[i]-1 for i in range(len(shape))])
+    Ls = [extents[1]-extents[0] if isinstance(extent, tuple) else extent for extent in extents]
+    if w_dims is None:
+        w_dims = []
+    return (np.array(Ls)/np.array([shape[i] if i in w_dims else shape[i]-1 for i in range(len(shape))])).tolist()
 
-def get_mids(shape, w_dims=[]):
+def get_mids(shape, w_dims=None):
     """
     Returns the index of the center of shape.
     Raises AssertionError if the center of shape does not coincide with a particular index
     """
+    if w_dims is None:
+        w_dims = []
     D = len(shape)
-    assert all([shape[d] % 2 == 0 if d in w_dims else shape[d] % 2 == 1 for d in range(D)]) # odd number of neurons for symmetry
+    if not all([shape[d] % 2 == 0 if d in w_dims else shape[d] % 2 == 1 for d in range(D)]):
+        raise ValueError("the given shape does not have a center point")
     return tuple([shape[d]//2 if d in w_dims else (shape[d]-1)//2 for d in range(D)])
 
-def get_grid(Ls, shape, w_dims=[], device='cpu'):
-    endpoints = [False if i in w_dims else True for i in range(len(Ls))]
-    grids_per_dim = [_torch.linspace(-L/2,L/2,shape[i],endpoint=endpoints[i],device=device) for i, L in enumerate(Ls)]
-    grid = torch.stack(torch.meshgrid(*grids_per_dim, indexing='ij'), dim=-1)
-    return grid
-
-def get_range_grid(ranges, shape, w_dims=[], device='cpu'):
-    endpoints = [False if i in w_dims else True for i in range(len(ranges))]
-    grids_per_dim = [_torch.linspace(ranges[i][0],ranges[i][1],shape[i],endpoint=endpoints[i],device=device) for i, L in enumerate(ranges)]
-    grid = torch.stack(torch.meshgrid(*grids_per_dim, indexing='ij'), dim=-1)
-    return grid
-
-def get_int_grid(shape, device='cpu'):
-    grids_per_dim = [torch.arange(shape[i], device=device) for i in range(len(shape))]
+def get_grid(extents, shape=None, dxs=None, w_dims=None, method='linspace', device='cpu'):
+    """
+    Get a grid (i.e. a tensor with shape (n_1, n_2, ..., n_N, n_1+...+n_N) where grid[*idx,:] are coordinates)
+    by specifying the extents in each dimension and the shape (n_1, ..., n_N).
+    
+    Parameters:
+        extents: list of tuples of scalars (2,) or list of scalars - If list of tuples, each i-th tuple
+                 indicates the lower and upper bound of the i-th dimension. If list of scalars, the lower
+                 and upper bound are interpreted as (-scalar/2, scalar/2) for method='linspace' and
+                 (0, scalar) for method='arange'.
+        shape: tuple - shape of the grid, ignored if method is not 'linspace'
+        dxs: tuple - step sizes in each dimension, ignored if method is not 'arange'. If None, defaults to
+             step sizes of 1 along each dimension.
+        w_dims: list of ints - a list of the dimensions along which the endpoint is not included, which is
+                useful for dimensions which are periodic/wrapped (w in w_dims stands for wrapped). Ignored
+                if method='arange'.
+        method: 'linspace' or 'arange'. Specifies whether torch.linspace or torch.arange is used.
+        device: The device on which the grid is created.
+        
+    Returns:
+        grid: torch.Tensor
+        
+    """
+    assert all([len(extent) == 2 for extent in extents if isinstance(extent, tuple)])
+    if method == 'linspace':
+        if shape is None:
+            raise ValueError("shape must be provided when method='linspace'")
+        else:
+            assert len(extents) == len(shape)
+    if method == 'arange':
+        if dxs is None:
+            dxs = [1 for _ in range(len(extents))]
+        else:
+            assert len(extents) == len(dxs)
+    if w_dims is None:
+        w_dims = []
+    else:
+        assert isinstance(w_dims, list)
+    if len(w_dims) > 0:
+        assert max(w_dims) < len(extents)
+    
+    if method == 'linspace':
+        extents = [extent if isinstance(extent, tuple) else (-extent/2, extent/2) for extent in extents]
+        endpoints = [False if i in w_dims else True for i in range(len(extents))]
+        grids_per_dim = [_torch.linspace(extent[0],extent[1],N,endpoint,device=device) for extent, N, endpoint in zip(extents, shape, endpoints)]
+    elif method == 'arange':
+        extents = [extent if isinstance(extent, tuple) else (0, extent) for extent in extents]
+        grids_per_dim = [torch.arange(extent[0],extent[1],dx,device=device) for extent, dx in zip(extents, dxs)]
+    else:
+        raise NotImplementedError()
+        
     grid = torch.stack(torch.meshgrid(*grids_per_dim, indexing='ij'), dim=-1)
     return grid
 
@@ -56,3 +153,13 @@ def meshgrid(tensors):
     shapes = [[1]*M_befores[i]+sizes[i]+[1]*M_afters[i]+[Ns[i]] for i, tensor in enumerate(tensors)]
     expanded_tensors = [tensor.reshape(shapes[i]).expand(utils.itertools.flatten_seq(sizes)+[Ns[i]]) for i, tensor in enumerate(tensors)]
     return expanded_tensors
+
+def slice_coord(tensor, i):
+    """
+    Assume tensor has shape (n_1, n_2, ..., n_N, n_1+...+n_N)
+    which is a stacked meshgrid of 1D tensors.
+    Then slice_coord(tensor,i) returns the slice (0,...,:,0,...,0,i)
+    where : is at the i-th index.
+    """
+    N = tensor.ndim - 1
+    return tensor[tuple([0]*i + [slice(None)] + [0]*(N-i-1))][:,i]

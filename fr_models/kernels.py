@@ -1,10 +1,18 @@
+import abc
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from . import _torch, periodic, gridtools
 
-class K_g(torch.nn.Module):
+class Kernel(abc.ABC, torch.nn.Module):
+    def discretize(self, grid):
+        outer_grid_x, outer_grid_y = gridtools.meshgrid([grid,grid])
+        W = self.forward(outer_grid_x,outer_grid_y)*grid.dA
+        return W
+
+class K_g(Kernel):
     def __init__(self, scale, cov, normalize=True):
         assert cov.shape[-2] == cov.shape[-1] and torch.all(cov == torch.swapaxes(cov, -2, -1))
         try:
@@ -24,8 +32,8 @@ class K_g(torch.nn.Module):
         self.D = cov.shape[-1]
         self.cov_shape = cov_shape
         
-        self.scale = torch.nn.Parameter(scale)
-        self.cov = torch.nn.Parameter(cov)
+        self.scale = scale
+        self.cov = cov
         self.normalize = normalize
         
     def forward(self, x, y=0.0):
