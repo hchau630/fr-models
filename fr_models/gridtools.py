@@ -19,6 +19,10 @@ class Grid(torch.Tensor):
         self._dxs = dxs if dxs is not None else get_dxs(extents, shape, w_dims=w_dims)
         self._dA = np.prod(self._dxs)
         self._w_dims = w_dims
+        
+    @property
+    def tensor(self):
+        return self.as_subclass(torch.Tensor) # return a pure torch.Tensor without all the extra attribute
     
     @property
     def extents(self):
@@ -41,7 +45,7 @@ class Grid(torch.Tensor):
         return get_mids(self.shape, w_dims=self.w_dims) # throws AssertionError if grid does not have a point that lies exactly in the middle
     
     def slice(self, i):
-        return slice_coord(self, i)
+        return slice_coord(self.tensor, i)
         
 #     @staticmethod
 #     def meshgrid(grids):

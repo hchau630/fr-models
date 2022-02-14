@@ -5,7 +5,7 @@ from torchdiffeq import odeint, odeint_event
 import numpy as np
 import torch
 
-from . import _torch, gridtools, exceptions
+from . import _torch, gridtools, exceptions, timeout
 
 class NumericalModel(abc.ABC, torch.nn.Module):
     def __init__(self, W):
@@ -20,6 +20,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
     def _drdt(self, t, r, h):
         return
         
+    @timeout.timeout(seconds=10)
     def forward(self, h, r0, t, event_fn=None, odeint_interface=odeint, **kwargs):
         """
         Solves an ODE with input h and initial state r0 at time stamps t.
@@ -71,18 +72,26 @@ class NumericalModel(abc.ABC, torch.nn.Module):
 
         drdt = partial(self._drdt, h=_h)    
         
-        if event_fn is None:
-            r = odeint_interface(drdt, _r0, _t, **kwargs)
-            
-            if t.ndim == 0:
-                return r[-1], t
-            return r, t
-        
-        else:
-            _event_fn = partial(event_fn, h=_h)
-            event_t, r = odeint_event(drdt, _r0, t0, event_fn=_event_fn, odeint_interface=odeint_interface, **kwargs)
-            
-            return r[-1], event_t
+        try:
+            if event_fn is None:
+                r = odeint_interface(drdt, _r0, _t, **kwargs)
+
+                if t.ndim == 0:
+                    return r[-1], t
+                return r, t
+
+            else:
+                _event_fn = partial(event_fn, h=_h)
+                event_t, r = odeint_event(drdt, _r0, t0, event_fn=_event_fn, odeint_interface=odeint_interface, **kwargs)
+
+                return r[-1], event_t
+        except AssertionError as err:
+            # Sometimes odeint raises an error AssertionError('underflow in dt ...')
+            # This catches that error and re-raises the error with a more detailed 
+            # explanation of that error message.
+            if str(err).startswith('underflow in dt'):
+                raise exceptions.RequiredStepSizeTooSmall(f'AssertionError in odeint: {err}. This is due to the adaptive solver needing to use a step size that is too small, which in turn implies the problem is likely too stiff. See https://github.com/rtqichen/torchdiffeq/blob/master/FAQ.md')
+            raise
     
     def steady_state(self, h, r0, t0, dr_rtol=1.0e-3, dr_atol=1.0e-5, max_t=500.0, **kwargs):
         max_t = max_t*self.tau
@@ -99,6 +108,9 @@ class NumericalModel(abc.ABC, torch.nn.Module):
         epsilon = 1.0e-1
         if t >= max_t - epsilon:
             raise exceptions.SteadyStateNotReached(f"Failed to convergence to steady state with tolerance dr_rtol={dr_rtol}, dr_atol={dr_atol} within maximum time {max_t}.")
+        if t == t0:
+            raise exceptions.ToleranceTooLarge("numerical model returned steady state as the inital state, probably because dr_rtol and dr_atol are too big. Try reducing those numbers.") 
+            
         return r, t
         
 class MultiDimModel(NumericalModel):
@@ -258,6 +270,14 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     @property
     def f_prime(self):
         return 2*self.r_star**0.5
+    
+    def spectral_radius(self):
+        F = torch.diag(self.f_prime.reshape(-1))
+        return torch.linalg.eigvals(F @ self.W).abs().max()
+    
+    def instability(self):
+        F = torch.diag(self.f_prime.reshape(-1))
+        return torch.linalg.eigvals(F @ self.W).real.max()
     
     def _drdt(self, t, r, h):
         result = self.f_prime.reshape(-1) * (self.W @ r + h(t)) - r

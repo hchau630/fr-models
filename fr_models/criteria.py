@@ -1,9 +1,7 @@
 import torch
 
-class NormalizedMSELoss(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.mse_loss = torch.nn.MSELoss()
-        
+class NormalizedLoss(torch.nn.Module):
     def forward(self, x, y):
-        return self.mse_loss(x, y)/(y**2).mean()**0.5
+        numerator = ((x-y)**2).mean()**0.5
+        denominator = (y**2).mean()**0.5
+        return numerator / denominator

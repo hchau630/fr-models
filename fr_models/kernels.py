@@ -8,7 +8,7 @@ from . import _torch, periodic, gridtools
 
 class Kernel(abc.ABC, torch.nn.Module):
     def discretize(self, grid):
-        outer_grid_x, outer_grid_y = gridtools.meshgrid([grid,grid])
+        outer_grid_x, outer_grid_y = gridtools.meshgrid([grid.tensor,grid.tensor])
         W = self.forward(outer_grid_x,outer_grid_y)*grid.dA
         return W
 

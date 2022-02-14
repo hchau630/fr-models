@@ -1,8 +1,15 @@
-import functools 
+import functools
+import logging
+import pprint
 
 import torch
 import numpy as np
 from scipy.optimize import minimize
+
+from . import exceptions
+from . import constraints as con
+
+logger = logging.getLogger(__name__)
 
 class Bounds:
     def __init__(self, epsilon=0):
@@ -67,23 +74,26 @@ class Parameter(torch.nn.Parameter):
         self.bounds = bounds
         
 class Optimizer():
-    def __init__(self, model, criterion, method=None, constraints=[], tol=None, callback=None, options=None):
+    def __init__(self, model, criterion, regularizer=None, method=None, constraints=[], tol=None, callback=None, options=None, use_autograd=True):
         """
         model should be a torch.nn.Module. This function optimizes all optimizer.Parameter instances in model.
         parameters.bounds will also be used to ensure the parameter lies within bounds. 
 
         Parameters:
           model: a torch.nn.Module
-          constraints: a list of callables that has the signature func: torch.nn.Module -> scalar
+          constraints: a list of constraints.Constraint objects
 
         """
         self.model = model
         self.criterion = criterion
+        self.regularizer = regularizer
         self.method = method
-        self.constraints = list(map(lambda f: self.func_wrapper(f), constraints))
+        self.constraints = list(map(lambda c: {'type': c.type.value, 'fun': self.constraint_wrapper(c)}, constraints))
+        self.constraint_names = [type(constraint).__name__ for constraint in constraints]
         self.tol = tol
-        self.callback = self.func_wrapper(callback) if callback is not None else None
+        self.callback = callback
         self.options = options
+        self.use_autograd = use_autograd
     
     @property
     def params(self):
@@ -130,42 +140,144 @@ class Optimizer():
                 bounds += param.bounds[param.requires_optim].tolist()
         return bounds
     
-    def func_wrapper(self, f):
+    def state_dict(self, param_only=False):
+        if not param_only:
+            return self.model.state_dict()
+        state_dict = {}
+        for name, param in self.model.named_parameters():
+            if isinstance(param, Parameter):
+                state_dict[name] = param.data
+        return state_dict
+    
+    def constraint_wrapper(self, f):
         
         @functools.wraps(f)
-        def wrapped_f(params):
+        def wrapped_f(params, **kwargs):
+            # logger.debug(f"!!!!!!Inside wrapped constraint {f}!!!!!!")
+            # logger.debug(params)
             self.params = params
-
+            # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
             with torch.no_grad():
-                return f(self.model)
+                result = f(self.model, **kwargs)
+                # logger.debug(f"Constraint result {result}")
+                return result
 
         return wrapped_f
+    
+    def compute_loss(self, x, y):
+        # logger.debug("!!!!!Inside compute loss!!!!")
+        # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
+        try:
+            y_pred = self.model(x)
+        except (exceptions.NumericalModelError, exceptions.TimeoutError) as err:
+            # Return np.inf is not using autograd, but re-raise error when using autograd
+            # since we don't have a gradient that can be returned
+            # if self.use_autograd:
+            #     raise
+            logger.info(f"Loss is set to np.inf due to error encountered in self.model(x): {err}")
+            return torch.tensor(np.inf)
+
+        # logger.debug(y_pred)
+        # logger.debug(y)
+        return self.criterion(y_pred, y)
         
     def __call__(self, x, y):
+        logger.info("Started optimizing...")
+        # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
+        
+        loss_hist = []
+        params_hist = []
+        satisfied_hist = []
+        
         def fun(params):
-            self.params = params
-
-            y_pred = self.model(x)
-            loss = self.criterion(y_pred, y)
-
-            self.model.zero_grad()
-            loss.backward()
+            with torch.set_grad_enabled(self.use_autograd):
+                self.params = params
+                
+                loss = self.compute_loss(x, y)
+                if self.regularizer is not None:
+                    loss += self.regularizer(self.model)
             
-            print(self.params)
+            if self.use_autograd:
+                if loss.item() == np.inf:
+                    return loss.item(), [np.nan for _ in range(len(params))]
+                self.model.zero_grad()
+                loss.backward()
+                
+                return loss.item(), self.params_grad.tolist()
+            # logger.debug(f"inside fun loss: {loss.item()}")
+            return loss.item()
+        
+        def callback(params):
+            # logger.debug("!!!Inside callback!!!")
+            with torch.no_grad():
+                self.params = params
+                # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
+                all_satisfied = []
+                for i, constraint in enumerate(self.constraints):
+                    val = constraint['fun'](params)
+                    if constraint['type'] == con.Types.EQ.value:
+                        satisfied = val == 0
+                    elif constraint['type'] == con.Types.INEQ.value:
+                        satisfied = val >= 0
+                    else:
+                        raise RuntimeError()
+                    logger.debug(f"{self.constraint_names[i]} - satisfied: {satisfied}, value: {val}")
+                    all_satisfied.append(satisfied)
+                is_all_satisfied = all(all_satisfied)
+                
+                loss = self.compute_loss(x, y)
+                loss_hist.append(loss.item())
+                params_hist.append(params)
+                satisfied_hist.append(is_all_satisfied)
+                
+                logger.info(f"Loss: {loss.item()}, satisfied: {all_satisfied}, is_all_satisfied: {is_all_satisfied}.")
+                
+                if self.callback is not None:
+                    self.callback(self, x, y)
+
+        try:
+            result = minimize(fun,
+                self.params.tolist(),
+                method=self.method,
+                jac=self.use_autograd,
+                bounds=self.bounds,
+                constraints=self.constraints,
+                tol=self.tol,
+                callback=callback,
+                options=self.options,
+            )
+        except (exceptions.NumericalModelError, exceptions.TimeoutError) as err:
+            logger.info(f"Optimization failed due to exception: {err}")
+            # logger.debug("Details of the exception: ", exc_info=True)
             
-            return loss.item(), self.params_grad.tolist()
+            logger.debug(loss_hist)
+            logger.debug(satisfied_hist)
+            
+            if len(loss_hist) == 0:
+                logger.info("No result returned.")
+                return False, np.inf
+            
+            loss_hist = np.array(loss_hist)
+            params_hist = np.array(params_hist)
+            satisfied_hist = np.array(satisfied_hist)
+            
+            satisfied_loss_hist = loss_hist[satisfied_hist] # get only the losses where constraint is satisfied
+            satisfied_params_hist = params_hist[satisfied_hist]
 
-        result = minimize(fun,
-            self.params.tolist(),
-            method=self.method,
-            jac=True,
-            bounds=self.bounds,
-            constraints=self.constraints,
-            tol=self.tol,
-            callback=self.callback,
-            options=self.options,
-        )
-
-        self.params = result.x
-        loss = self.criterion(self.model(x), y).item()
-        return result.success, loss
+            if len(satisfied_loss_hist) == 0:
+                logger.info("No result returned.")
+                return False, np.inf
+        
+            idx, min_loss = np.argmin(satisfied_loss_hist), np.min(satisfied_loss_hist)
+            self.params = satisfied_params_hist[idx]
+            logger.info(f"Returning result during optimization. Loss: {min_loss}.")
+            return True, min_loss
+        
+        if result.success:
+            with torch.no_grad():
+                self.params = result.x
+                loss = self.compute_loss(x, y).item()
+            logger.info(f"Finished optimization successfully. Loss: {loss}")
+            return True, loss
+        logger.info(f"Optimization failed due to reason: {result.message}")
+        return False, np.inf
