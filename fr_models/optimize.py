@@ -252,8 +252,8 @@ class Optimizer():
             logger.info(f"Optimization failed due to exception: {err}")
             # logger.debug("Details of the exception: ", exc_info=True)
             
-            logger.info("Loss hist: ", loss_hist)
-            logger.info("Satisfied hist: ", satisfied_hist)
+            logger.info(f"Loss hist: {loss_hist}")
+            logger.info(f"Satisfied hist: {satisfied_hist}")
             
             if len(loss_hist) == 0:
                 logger.info("No result returned since len(loss_hist) = 0.")
@@ -266,7 +266,7 @@ class Optimizer():
             satisfied_loss_hist = loss_hist[satisfied_hist] # get only the losses where constraint is satisfied
             satisfied_params_hist = params_hist[satisfied_hist]
     
-            logger.info("Satisfied loss hist: ", satisfied_loss_hist)
+            logger.info(f"Satisfied loss hist: {satisfied_loss_hist}")
         
             if len(satisfied_loss_hist) == 0:
                 logger.info("No result returned since len(satisfied_loss_hist) = 0.")
