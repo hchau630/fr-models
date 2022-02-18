@@ -36,7 +36,8 @@ def get_dataset():
     
     # Define training data
     x_data, y_data_mean, y_data_sem = load_exp_data(data_path)
-    y_data = np.random.normal(y_data_mean, y_data_sem) # sample data
+    # y_data = np.random.normal(y_data_mean, y_data_sem) # sample data
+    y_data = y_data_mean # for debugging, see github branch debug_2
     x_data = torch.tensor(x_data, dtype=torch.float)
     y_data = torch.tensor(y_data, dtype=torch.float)
     
@@ -53,10 +54,14 @@ def get_model(device='cpu'):
     # W
     w_dist = torch.distributions.Normal(0.0,1.0)
     W = optim.Parameter(
+        # torch.tensor([
+        #     [w_dist.sample().abs(), -w_dist.sample().abs()],
+        #     [w_dist.sample().abs(), -w_dist.sample().abs()],
+        # ]),
         torch.tensor([
-            [w_dist.sample().abs(), -w_dist.sample().abs()],
-            [w_dist.sample().abs(), -w_dist.sample().abs()],
-        ]),
+            [0.9283, -1.0534],
+            [0.3060, -0.2324],
+        ]), # for debugging, see github branch debug_2
         bounds=torch.tensor([
             [b.pos, b.neg],
             [b.pos, b.neg],
@@ -68,7 +73,11 @@ def get_model(device='cpu'):
     sigma_bounds = [0.01,0.5]
     s_dist = torch.distributions.Uniform(*sigma_bounds)
     sigma_s = optim.Parameter(
-        s_dist.sample((2,2)),        
+        # s_dist.sample((2,2)),   
+        torch.tensor(
+            [[0.2336, 0.0679],
+             [ 0.2584, 0.3015]]
+        ), # for debugging, see github branch debug_2
         bounds=torch.tensor(sigma_bounds),
     )
     
@@ -80,7 +89,8 @@ def get_model(device='cpu'):
     # amplitude
     a_dist = torch.distributions.Normal(0.0,1.0)
     amplitude = optim.Parameter(
-        a_dist.sample().abs(),
+        # a_dist.sample().abs(),
+        torch.tensor(0.5666), # for debugging, see github branch debug_2
         bounds=torch.tensor(b.pos),
     )
     
