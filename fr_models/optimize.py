@@ -1,6 +1,7 @@
 import functools
 import logging
 import pprint
+import time
 
 import torch
 import numpy as np
@@ -74,7 +75,7 @@ class Parameter(torch.nn.Parameter):
         self.bounds = bounds
         
 class Optimizer():
-    def __init__(self, model, criterion, regularizer=None, method=None, constraints=[], tol=None, callback=None, options=None, use_autograd=True):
+    def __init__(self, model, criterion, regularizer=None, method=None, constraints=[], tol=None, callback=None, options=None, use_autograd=True, timeout=1000):
         """
         model should be a torch.nn.Module. This function optimizes all optimizer.Parameter instances in model.
         parameters.bounds will also be used to ensure the parameter lies within bounds. 
@@ -94,6 +95,7 @@ class Optimizer():
         self.callback = callback
         self.options = options
         self.use_autograd = use_autograd
+        self.timeout = timeout
     
     @property
     def params(self):
@@ -171,6 +173,7 @@ class Optimizer():
     def __call__(self, x, y):
         logger.info("Started optimizing...")
         logger.debug(pprint.pformat(self.state_dict()))
+        start_time = time.time()
         
         loss_hist = []
         params_hist = []
@@ -194,6 +197,9 @@ class Optimizer():
             return loss.item()
         
         def callback(params):
+            if (time_taken := time.time() - start_time) > self.timeout:
+                raise exceptions.TimeoutError(f"optimizer.optimize has been running for {time_taken} seconds and timed out.")
+                
             with torch.no_grad():
                 self.params = params
                 
@@ -237,15 +243,20 @@ class Optimizer():
                 callback=callback,
                 options=self.options,
             )
-        except (exceptions.NumericalModelError, exceptions.TimeoutError) as err:
+            if not result.success:
+                if result.message == 'Iteration limit reached':
+                    raise exceptions.IterationStepsExceeded(result.message)
+                raise exceptions.OptimizationError(result.message)
+            
+        except (exceptions.NumericalModelError, exceptions.OptimizationError, exceptions.TimeoutError) as err:
             logger.info(f"Optimization failed due to exception: {err}")
             # logger.debug("Details of the exception: ", exc_info=True)
             
-            logger.debug(loss_hist)
-            logger.debug(satisfied_hist)
+            logger.info("Loss hist: ", loss_hist)
+            logger.info("Satisfied hist: ", satisfied_hist)
             
             if len(loss_hist) == 0:
-                logger.info("No result returned.")
+                logger.info("No result returned since len(loss_hist) = 0.")
                 return False, np.inf
             
             loss_hist = np.array(loss_hist)
@@ -254,9 +265,11 @@ class Optimizer():
             
             satisfied_loss_hist = loss_hist[satisfied_hist] # get only the losses where constraint is satisfied
             satisfied_params_hist = params_hist[satisfied_hist]
-
+    
+            logger.info("Satisfied loss hist: ", satisfied_loss_hist)
+        
             if len(satisfied_loss_hist) == 0:
-                logger.info("No result returned.")
+                logger.info("No result returned since len(satisfied_loss_hist) = 0.")
                 return False, np.inf
         
             idx, min_loss = np.argmin(satisfied_loss_hist), np.min(satisfied_loss_hist)
@@ -264,11 +277,8 @@ class Optimizer():
             logger.info(f"Returning result during optimization. Loss: {min_loss}.")
             return True, min_loss
         
-        if result.success:
-            with torch.no_grad():
-                self.params = result.x
-                loss = self.compute_loss(x, y).item()
-            logger.info(f"Finished optimization successfully. Loss: {loss}")
-            return True, loss
-        logger.info(f"Optimization failed due to reason: {result.message}")
-        return False, np.inf
+        with torch.no_grad():
+            self.params = result.x
+            loss = self.compute_loss(x, y).item()
+        logger.info(f"Finished optimization successfully. Loss: {loss}")
+        return True, loss

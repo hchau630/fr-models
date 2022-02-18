@@ -12,3 +12,9 @@ class RequiredStepSizeTooSmall(NumericalModelError):
 
 class TimeoutError(Exception):
     pass
+
+class IterationStepsExceeded(TimeoutError):
+    pass
+
+class OptimizationError(Exception):
+    pass
