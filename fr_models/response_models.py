@@ -1,17 +1,23 @@
 import torch
+import logging
 
 from . import interp
 from . import exceptions
+from . import analytic_models as amd
+
+logger = logging.getLogger(__name__)
 
 class SteadyStateResponse(torch.nn.Module):
-    def __init__(self, a_model, grid, r_star, amplitude, i, j, method='dynamic', dr_rtol=1.0e-3, dr_atol=1.0e-5, max_t=500.0, solver_kwargs=None):
+    def __init__(self, a_model, grid, r_star, amplitude, i, j, length_scales, method='dynamic', dr_rtol=1.0e-3, dr_atol=1.0e-5, max_t=500.0, solver_kwargs=None):
         super().__init__()
         self.a_model = a_model
-        self.register_buffer('grid', grid)
+        self.register_buffer('grid', grid, persistent=False) # persistent=False means don't store in state_dict
         self.r_star = r_star
         self.amplitude = amplitude
-        self.register_buffer('i', i) # output cell type number
-        self.register_buffer('j', j) # input cell type number
+        self.i = i # output cell type number
+        self.j = j # input cell type number
+        # Note: length_scale = what 1.0 in model means in the units of the data
+        self.register_buffer('length_scales', length_scales, persistent=False) # persistent=False means don't store in state_dict
         self.method = method
         self.dr_rtol = dr_rtol
         self.dr_atol = dr_atol
@@ -21,6 +27,12 @@ class SteadyStateResponse(torch.nn.Module):
         # There is an open issue on this: https://github.com/pytorch/pytorch/issues/35735, but no progress so far...
         
     def forward(self, x):
+        """
+        x - shape (*batch_shape, a_model.ndim)
+        """
+        # preprocess x to scale it according to length scale
+        x = x / self.length_scales
+
         dxs = torch.tensor(self.grid.dxs, dtype=torch.float, device=x.device)
         if torch.any((torch.abs(x) < dxs) & (x != 0)):
             raise RuntimeError("x must not be within interpolation range near 0. Try increasing number of neurons.")
@@ -45,3 +57,17 @@ class SteadyStateResponse(torch.nn.Module):
 
         return delta_ri_curve(x)
     
+class RadialSteadyStateResponse(SteadyStateResponse):
+    def __init__(self, a_model, *args, **kwargs):
+        assert isinstance(a_model, amd.SpatialSSNModel) # TODO: define a SpatialModel abstract base class and we can check that inheritance of that class instead
+        super().__init__(a_model, *args, **kwargs)
+    
+    def forward(self, x):
+        """
+        x - shape (*batch_shape, ndim_f+1), where the leading dim along the last axis is the radial spatial dimension
+        """
+        if self.a_model.ndim_s > 1:
+            x_space, x_feature = x[...,:1], x[...,1:]
+            x_pad = torch.zeros((*x.shape[:-1],self.a_model.ndim_s-1))
+            x = torch.cat([x_space, x_pad, x_feature],dim=-1)
+        return super().forward(x)

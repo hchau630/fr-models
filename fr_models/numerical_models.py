@@ -191,18 +191,16 @@ class TrivialVBModel(MultiDimModel):
                    neuron at the origin of the B space.
         """
         device = amplitude.device
-        assert F_idx.device == device
-        if B_idx is not None:
-            assert B_idx.deivce == device
-            
-        h = torch.zeros(self.shape, device=device)
         
         if B_idx is None:
             B_idx = gridtools.get_mids(self.B_shape, w_dims=self.w_dims)
-            B_idx = torch.tensor(B_idx, device=device)
+            
+        F_idx = torch.as_tensor(F_idx, device=device)
         F_idx = torch.atleast_2d(F_idx)
+        B_idx = torch.as_tensor(B_idx, device=device)
         B_idx = torch.atleast_2d(B_idx)
-        
+            
+        h = torch.zeros(self.shape, device=device)        
         h[(*F_idx.T,*B_idx.T)] = amplitude
         
         return h
