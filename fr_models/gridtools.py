@@ -25,6 +25,10 @@ class Grid(torch.Tensor):
         return self.as_subclass(torch.Tensor) # return a pure torch.Tensor without all the extra attribute
     
     @property
+    def grid_shape(self):
+        return self.tensor.shape[:-1]
+    
+    @property
     def extents(self):
         return self._extents
     
@@ -42,10 +46,18 @@ class Grid(torch.Tensor):
     
     @property
     def mids(self):
-        return get_mids(self.shape, w_dims=self.w_dims) # throws AssertionError if grid does not have a point that lies exactly in the middle
+        return get_mids(self.grid_shape, w_dims=self.w_dims) # throws AssertionError if grid does not have a point that lies exactly in the middle
     
     def slice(self, i):
         return slice_coord(self.tensor, i)
+    
+    def to(self, *args, **kwargs):
+        new_tensor = self.tensor.to(*args, **kwargs)
+        return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
+    
+    def cpu(self, *args, **kwargs):
+        new_tensor = self.tensor.cpu(*args, **kwargs)
+        return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
         
 #     @staticmethod
 #     def meshgrid(grids):

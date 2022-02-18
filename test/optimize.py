@@ -41,31 +41,43 @@ def train():
     # W
     w_dist = torch.distributions.Normal(0.0,1.0)
     W = optim.Parameter(
-        torch.tensor([
-            [w_dist.sample().abs(), -w_dist.sample().abs()],
-            [w_dist.sample().abs(), -w_dist.sample().abs()],
-        ]),
+        # torch.tensor([
+        #     [w_dist.sample().abs(), -w_dist.sample().abs()],
+        #     [w_dist.sample().abs(), -w_dist.sample().abs()],
+        # ]),
         # torch.tensor([
         #     [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs()],
         #     [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs()],
         #     [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs()],
         #     [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs()],
         # ]),
+        torch.tensor([
+            [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(),                    0.0],
+            [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(),                    0.0],
+            [w_dist.sample().abs(),                    0.0,                    0.0, -w_dist.sample().abs()],
+            [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(),                    0.0],
+        ]),
         # torch.tensor([
         #     [0.79903045, -0.22798239],
         #     [0.78063547, -0.01],
         # ]),
-        bounds=torch.tensor([
-            [b.pos, b.neg],
-            [b.pos, b.neg],
-        ]),
-        requires_optim=True,
         # bounds=torch.tensor([
-        #     [b.pos, b.neg, b.neg, b.neg],
-        #     [b.pos, b.neg, b.neg, b.neg],
-        #     [b.pos, b.neg, b.neg, b.neg],
-        #     [b.pos, b.neg, b.neg, b.neg],
+        #     [b.pos, b.neg],
+        #     [b.pos, b.neg],
         # ]),
+        # requires_optim=True,
+        requires_optim=torch.tensor([
+            [True,  True,  True, False],
+            [True,  True,  True, False],
+            [True, False, False,  True],
+            [True,  True,  True, False],
+        ]),
+        bounds=torch.tensor([
+            [b.pos, b.neg, b.neg, b.neg],
+            [b.pos, b.neg, b.neg, b.neg],
+            [b.pos, b.neg, b.neg, b.neg],
+            [b.pos, b.neg, b.neg, b.neg],
+        ]),
     )
     
     # sigma
@@ -73,8 +85,8 @@ def train():
     sigma_bounds = [0.1,0.5]
     s_dist = torch.distributions.Uniform(*sigma_bounds)
     sigma_s = optim.Parameter(
-        s_dist.sample((2,2)),
-        # s_dist.sample((4,4)),
+        # s_dist.sample((2,2)),
+        s_dist.sample((4,4)),
         # torch.tensor(
         #     [[30.60939689, 31.54267749],
         #      [ 5.82356181, 11.72982061]]
@@ -107,8 +119,8 @@ def train():
     a_model = amd.SpatialSSNModel(W, sigma_s, ndim_s, w_dims=w_dims)
     grid = gridtools.Grid(Ls, shape, w_dims=w_dims, device=device)
     _, y_data_base, _, _ = load_exp_data('/home/hc3190/ken/spatial-model/data/baselines_new/base_by_dist.txt', normalize=L/2)
-    r_star = torch.tensor([np.mean(y_data_base), 1.2*np.mean(y_data_base)], dtype=torch.float)
-    # r_star = torch.tensor([np.mean(y_data_base), 1.2*np.mean(y_data_base), 1.2*np.mean(y_data_base), 1.2*np.mean(y_data_base)], dtype=torch.float)
+    # r_star = torch.tensor([np.mean(y_data_base), 1.2*np.mean(y_data_base)], dtype=torch.float)
+    r_star = torch.tensor([np.mean(y_data_base), 1.2*np.mean(y_data_base), 1.2*np.mean(y_data_base), 1.2*np.mean(y_data_base)], dtype=torch.float)
     r_star = optim.Parameter(r_star, requires_optim=False)
     
     solver_kwargs = None
@@ -142,7 +154,7 @@ def train():
     ]
     
     # Define optimizer
-    optimizer = optim.Optimizer(model, criterion, constraints=constraints, callback=None, tol=1.0e-6, use_autograd=True, options={'maxiter': 1000})
+    optimizer = optim.Optimizer(model, criterion, constraints=constraints, callback=None, tol=1.0e-6, use_autograd=True, options={'maxiter': 300})
     
     # Define training data
     x_data, y_data_mean, y_data_sem, scale = load_exp_data('/home/hc3190/ken/spatial-model/data/space_resp/resp_geq500_min.txt', normalize=L/2)

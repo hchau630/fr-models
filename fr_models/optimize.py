@@ -140,9 +140,7 @@ class Optimizer():
                 bounds += param.bounds[param.requires_optim].tolist()
         return bounds
     
-    def state_dict(self, param_only=False):
-        if not param_only:
-            return self.model.state_dict()
+    def state_dict(self):
         state_dict = {}
         for name, param in self.model.named_parameters():
             if isinstance(param, Parameter):
@@ -153,37 +151,26 @@ class Optimizer():
         
         @functools.wraps(f)
         def wrapped_f(params, **kwargs):
-            # logger.debug(f"!!!!!!Inside wrapped constraint {f}!!!!!!")
-            # logger.debug(params)
             self.params = params
-            # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
             with torch.no_grad():
                 result = f(self.model, **kwargs)
-                # logger.debug(f"Constraint result {result}")
                 return result
 
         return wrapped_f
     
     def compute_loss(self, x, y):
-        # logger.debug("!!!!!Inside compute loss!!!!")
-        # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
         try:
             y_pred = self.model(x)
         except (exceptions.NumericalModelError, exceptions.TimeoutError) as err:
-            # Return np.inf is not using autograd, but re-raise error when using autograd
-            # since we don't have a gradient that can be returned
-            # if self.use_autograd:
-            #     raise
-            logger.info(f"Loss is set to np.inf due to error encountered in self.model(x): {err}")
+            logger.debug(f"Caught exception inside compute_loss: {err}")
             return torch.tensor(np.inf)
 
-        # logger.debug(y_pred)
-        # logger.debug(y)
+        logger.debug(f"y_pred, y: {y_pred}, {y}")
         return self.criterion(y_pred, y)
         
     def __call__(self, x, y):
         logger.info("Started optimizing...")
-        # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
+        logger.debug(pprint.pformat(self.state_dict()))
         
         loss_hist = []
         params_hist = []
@@ -204,15 +191,17 @@ class Optimizer():
                 loss.backward()
                 
                 return loss.item(), self.params_grad.tolist()
-            # logger.debug(f"inside fun loss: {loss.item()}")
             return loss.item()
         
         def callback(params):
-            # logger.debug("!!!Inside callback!!!")
             with torch.no_grad():
                 self.params = params
-                # logger.debug(pprint.pformat(self.state_dict(param_only=True)))
+                
+                # logger.debug(pprint.pformat(self.state_dict()))
+                
                 all_satisfied = []
+                values_dict = {}
+                
                 for i, constraint in enumerate(self.constraints):
                     val = constraint['fun'](params)
                     if constraint['type'] == con.Types.EQ.value:
@@ -221,8 +210,10 @@ class Optimizer():
                         satisfied = val >= 0
                     else:
                         raise RuntimeError()
-                    logger.debug(f"{self.constraint_names[i]} - satisfied: {satisfied}, value: {val}")
+
+                    values_dict[self.constraint_names[i]] = val
                     all_satisfied.append(satisfied)
+                    
                 is_all_satisfied = all(all_satisfied)
                 
                 loss = self.compute_loss(x, y)
@@ -230,7 +221,7 @@ class Optimizer():
                 params_hist.append(params)
                 satisfied_hist.append(is_all_satisfied)
                 
-                logger.info(f"Loss: {loss.item()}, satisfied: {all_satisfied}, is_all_satisfied: {is_all_satisfied}.")
+                logger.info(f"Loss: {loss.item()}, constraints: {values_dict}")
                 
                 if self.callback is not None:
                     self.callback(self, x, y)
