@@ -73,8 +73,8 @@ def train():
     )
     
     # sigma
-    # sigma_bounds = [0.01,0.5]
-    sigma_bounds = [0.1,0.5]
+    sigma_bounds = [0.01,0.5]
+    # sigma_bounds = [0.1,0.5]
     s_dist = torch.distributions.Uniform(*sigma_bounds)
     sigma_s = optim.Parameter(
         # s_dist.sample((2,2)),
