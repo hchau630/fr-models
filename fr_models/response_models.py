@@ -17,6 +17,7 @@ class SteadyStateResponse(torch.nn.Module):
         self.i = i # output cell type number
         self.j = j # input cell type number
         # Note: length_scale = what 1.0 in model means in the units of the data
+        length_scales = torch.as_tensor(length_scales)
         self.register_buffer('length_scales', length_scales, persistent=False) # persistent=False means don't store in state_dict
         self.method = method
         self.dr_rtol = dr_rtol

@@ -15,7 +15,7 @@ class Grid(torch.Tensor):
         if w_dims is None:
             w_dims = []
 
-        self._extents = extents
+        self._extents = [extent if isinstance(extent, tuple) else (-extent/2, extent/2) for extent in extents]
         self._dxs = dxs if dxs is not None else get_dxs(extents, shape, w_dims=w_dims)
         self._dA = np.prod(self._dxs)
         self._w_dims = w_dims
@@ -84,7 +84,7 @@ def get_dxs(extents, shape, w_dims=None):
     """
     returns list
     """
-    Ls = [extents[1]-extents[0] if isinstance(extent, tuple) else extent for extent in extents]
+    Ls = [extent[1]-extent[0] if isinstance(extent, tuple) else extent for extent in extents]
     if w_dims is None:
         w_dims = []
     return (np.array(Ls)/np.array([shape[i] if i in w_dims else shape[i]-1 for i in range(len(shape))])).tolist()
