@@ -41,10 +41,10 @@ def train():
     # W
     w_dist = torch.distributions.Normal(0.0,1.0)
     W = optim.Parameter(
-        torch.tensor([
-            [w_dist.sample().abs(), -w_dist.sample().abs()],
-            [w_dist.sample().abs(), -w_dist.sample().abs()],
-        ]),
+        # torch.tensor([
+        #     [w_dist.sample().abs(), -w_dist.sample().abs()],
+        #     [w_dist.sample().abs(), -w_dist.sample().abs()],
+        # ]),
         # torch.tensor([
         #     [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs()],
         #     [w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs(), -w_dist.sample().abs()],
@@ -55,6 +55,10 @@ def train():
         #     [0.79903045, -0.22798239],
         #     [0.78063547, -0.01],
         # ]),
+        torch.tensor([
+            [0.9283, -1.0534],
+            [0.3060, -0.2324],
+        ]),
         bounds=torch.tensor([
             [b.pos, b.neg],
             [b.pos, b.neg],
@@ -73,12 +77,16 @@ def train():
     sigma_bounds = [0.1,0.5]
     s_dist = torch.distributions.Uniform(*sigma_bounds)
     sigma_s = optim.Parameter(
-        s_dist.sample((2,2)),
+        # s_dist.sample((2,2)),
         # s_dist.sample((4,4)),
         # torch.tensor(
         #     [[30.60939689, 31.54267749],
         #      [ 5.82356181, 11.72982061]]
-        # )/575.0,          
+        # )/575.0,
+        torch.tensor(
+            [[0.2336, 0.0679],
+             [ 0.2584, 0.3015]]
+        ),
         bounds=torch.tensor(sigma_bounds),
     )
     # _, _, _, scale = load_exp_data('/home/hc3190/ken/spatial-model/data/space_resp/resp_geq500_min.txt', normalize=L/2)
@@ -95,8 +103,9 @@ def train():
     # amplitude
     a_dist = torch.distributions.Normal(0.0,1.0)
     amplitude = optim.Parameter(
-        a_dist.sample().abs(),
+        # a_dist.sample().abs(),
         # torch.tensor(1.5973258580974314),
+        torch.tensor(0.5666),
         bounds=torch.tensor(b.pos),
     )
     
@@ -142,11 +151,12 @@ def train():
     ]
     
     # Define optimizer
-    optimizer = optim.Optimizer(model, criterion, constraints=constraints, callback=None, tol=1.0e-6, use_autograd=True, options={'maxiter': 1000})
+    optimizer = optim.Optimizer(model, criterion, constraints=constraints, callback=None, tol=1.0e-6, use_autograd=True, options={'maxiter': 100})
     
     # Define training data
     x_data, y_data_mean, y_data_sem, scale = load_exp_data('/home/hc3190/ken/spatial-model/data/space_resp/resp_geq500_min.txt', normalize=L/2)
-    y_data = np.random.normal(y_data_mean, y_data_sem) # sample data
+    # y_data = np.random.normal(y_data_mean, y_data_sem) # sample data
+    y_data = y_data_mean
     x_data = np.concatenate([x_data,np.zeros((len(x_data),ndim_s-1))],axis=-1)
     x_data = torch.tensor(x_data, dtype=torch.float, device=device)
     y_data = torch.tensor(y_data, dtype=torch.float, device=device)
@@ -157,7 +167,7 @@ def train():
     return success, loss, optimizer.model, optimizer.state_dict()
     
 def main():
-    logging.basicConfig(level=logging.DEBUG, format='%(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     # logging.getLogger('fr_models.optimize').setLevel(logging.INFO)
     for _ in range(1000):
         success, loss, model, state_dict = train()
