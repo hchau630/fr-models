@@ -96,11 +96,12 @@ def get_model(device='cpu'):
     
     ndim_s = 1
     Ls = [2*1.0]*ndim_s # we want our model to be twice the data length scale
-    shape = tuple([101]*ndim_s)
-    w_dims = []
+    shape = tuple([100]*ndim_s)
+    w_dims = [0]
+    period = Ls[0]
     
     model = rmd.RadialSteadyStateResponse(
-        amd.SpatialSSNModel(W, sigma_s, ndim_s, w_dims=w_dims), 
+        amd.SpatialSSNModel(W, sigma_s, ndim_s, w_dims=w_dims, period=period), 
         gridtools.Grid(Ls, shape, w_dims=w_dims, device=device).cpu(), 
         r_star, 
         amplitude, 
@@ -131,8 +132,8 @@ def train(model, x, y, device='cpu'):
     # Define constraints
     constraints = [
         # con.SpectralRadiusCon(max_spectral_radius=0.99, trials=1),
-        con.StabilityCon(max_instability=0.99),
-        con.ParadoxicalCon(cell_type=1, min_subcircuit_instability=1.01),
+        con.StabilityCon(max_instability=0.99, use_circulant=True),
+        con.ParadoxicalCon(cell_type=1, min_subcircuit_instability=1.01, use_circulant=True),
     ]
     
     # Define optimizer
@@ -177,17 +178,17 @@ def main():
     # Train
     success, loss = train(model, x, y, device=device)
     
-    # Save results
-    if success:
-        model_name = uuid.uuid4()
-        path = pathlib.Path(f'{ENV["models_path"]}/{model_name}')
-        path.mkdir()
+#     # Save results
+#     if success:
+#         model_name = uuid.uuid4()
+#         path = pathlib.Path(f'{ENV["models_path"]}/{model_name}')
+#         path.mkdir()
 
-        torch.save(model.state_dict(), f'{path}/state_dict.pt')
-        torch.save(dataset.tensors, f'{path}/dataset.pt')
-        utils.io.save_config(f'{path}/meta.json', {'loss': loss})
+#         torch.save(model.state_dict(), f'{path}/state_dict.pt')
+#         torch.save(dataset.tensors, f'{path}/dataset.pt')
+#         utils.io.save_config(f'{path}/meta.json', {'loss': loss})
 
-        logger.info(f"Saving. Model name: {model_name}, loss: {loss}")
+#         logger.info(f"Saving. Model name: {model_name}, loss: {loss}")
     
 if __name__ == '__main__':
     print("Starting data fitting...")

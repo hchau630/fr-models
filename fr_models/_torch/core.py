@@ -3,6 +3,8 @@
 import torch
 from fr_models import gridtools
 
+__all__ = ['linspace', 'pad', 'tensor', 'isclose', 'allclose', 'isequal']
+
 def linspace(start, end, steps, endpoint=True, **kwargs):
     if endpoint:
         return torch.linspace(start, end, steps, **kwargs)
@@ -46,12 +48,15 @@ def tensor(data, **kwargs):
         # stop recursing if the element is already a tensor.
         return torch.stack([elem if isinstance(elem, torch.Tensor) else tensor(elem) for elem in data], dim=0)
     
-def atleast_0d(*args):
-    result = tuple([arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args])
-    return result[0] if len(result) == 1 else result
-
 def isclose(x, y, rtol=1.0e-5, atol=1.0e-8):
-    return torch.abs(x-y) <= atol + rtol * y
+    """
+    A more flexible version of torch.isclose that allows for different atols and rtols for different elements of the tensor
+    """
+    return (x-y).abs() <= atol + rtol * y.abs()
 
 def allclose(*args, **kwargs):
-    return torch.all(isclose(*args, **kwargs))
+    return isclose(*args, **kwargs).all()
+
+def isequal(x, dim=-1, rtol=1.0e-5, atol=1.0e-8):
+    x = x.moveaxis(dim,-1)
+    return isclose(x[...,:-1], x[...,1:], rtol=rtol, atol=atol).all(dim=-1)

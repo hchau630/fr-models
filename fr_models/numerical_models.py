@@ -258,7 +258,7 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
         
     @property
     def _f_prime(self):
-        return 2*self._r_star*0.5
+        return 2*self._r_star**0.5
     
     @property
     def r_star(self):
@@ -269,13 +269,21 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     def f_prime(self):
         return 2*self.r_star**0.5
     
-    def spectral_radius(self):
-        F = torch.diag(self.f_prime.reshape(-1))
-        return torch.linalg.eigvals(F @ self.W).abs().max()
-    
-    def instability(self):
-        F = torch.diag(self.f_prime.reshape(-1))
-        return torch.linalg.eigvals(F @ self.W).real.max()
+    def spectral_radius(self, use_circulant=False):
+        if use_circulant:
+            FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*shape,n,*shape)
+            return _torch.linalg.eigvalsbnc(FW, self.B_dim).abs().max()
+        else:
+            F = torch.diag(self.f_prime.reshape(-1))
+            return torch.linalg.eigvals(F @ self.W).abs().max()
+
+    def instability(self, use_circulant=False):
+        if use_circulant:
+            FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*shape,n,*shape)
+            return _torch.linalg.eigvalsbnc(FW, self.B_dim).real.max()
+        else:
+            F = torch.diag(self.f_prime.reshape(-1))
+            return torch.linalg.eigvals(F @ self.W).real.max()
     
     def _drdt(self, t, r, h):
         result = self.f_prime.reshape(-1) * (self.W @ r + h(t)) - r

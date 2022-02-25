@@ -21,7 +21,6 @@ class K_g(Kernel):
             print(cov)
             print("is not.")
         cov_shape = cov.shape[:-2]
-        scale = _torch.atleast_0d(scale)
         try:
             torch.broadcast_to(scale, cov_shape)
         except RuntimeError:
@@ -56,8 +55,10 @@ class K_wg(K_g):
     - Let z=x-y (might have broadcasting), then z should have shape (*,D) where * could be empty
     - Returns results with the shape (*,**)
     """
-    def __init__(self, *args, w_dims=[], order=3, period=2*torch.pi, **kwargs):
+    def __init__(self, *args, w_dims=None, order=3, period=2*torch.pi, **kwargs):
         super().__init__(*args, **kwargs)
+        if w_dims is None:
+            w_dims = []
         self.w_dims = w_dims
         self.order = order
         self.period = period

@@ -16,8 +16,8 @@ def wrap(f, w_dims, order=3, period=2*torch.pi):
     if len(w_dims) == 0:
         return f
 
-    w_dims = torch.tensor(w_dims)
-    period = torch.atleast_1d(torch.tensor(period))
+    w_dims = torch.as_tensor(w_dims)
+    period = torch.atleast_1d(torch.as_tensor(period))
     n = torch.arange(order)-(order-1)//2 # e.g. if order = 3, we have [-1,0,1]
     
     assert order % 2 == 1
@@ -56,9 +56,9 @@ def dist(x, y, w_dims, period=2*torch.pi):
     if len(w_dims) == 0:
         return torch.abs(x-y)
     
-    _x, _y = torch.broadcast_tensors(_torch.atleast_0d(x), _torch.atleast_0d(y))
-    w_dims = torch.tensor(w_dims)
-    period = torch.atleast_1d(torch.tensor(period))
+    _x, _y = torch.broadcast_tensors(torch.as_tensor(x), torch.as_tensor(y))
+    w_dims = torch.as_tensor(w_dims)
+    period = torch.atleast_1d(torch.as_tensor(period))
     assert w_dims.ndim == period.ndim == 1
     if len(period) == 1:
         period = period.expand_as(w_dims)
@@ -68,6 +68,8 @@ def dist(x, y, w_dims, period=2*torch.pi):
     D = z.shape[-1]
     device = z.device
     
+    _x = _x.to(device)
+    _y = _y.to(device)
     w_dims = w_dims.to(device)
     period = period.to(device)
     
