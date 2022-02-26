@@ -14,6 +14,6 @@ setup(
         'hyc-utils',
     ],
     extras_require={
-        'test': ['pytest'],
+        'test': ['pytest', 'pytest-benchmark'],
     }
 )

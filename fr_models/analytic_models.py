@@ -65,10 +65,10 @@ class GaussianSSNModel(AnalyticModel):
         cov = torch.diag_embed(self.sigma**2)
         return kernels.K_wg(scale, cov, w_dims=self.w_dims, order=self.wn_order, period=self.period)
         
-    def numerical_model(self, grid):
+    def numerical_model(self, grid, **kwargs):
         W_discrete = self.kernel.discretize(grid) # (*shape, *shape, n, n)
         W_discrete = W_discrete.moveaxis(-2, 0).moveaxis(-1, 1+self.ndim) # (n, *shape, n, *shape)
-        return nmd.MultiCellSSNModel(W_discrete, w_dims=self.w_dims, power=self.power)
+        return nmd.MultiCellSSNModel(W_discrete, w_dims=self.w_dims, power=self.power, **kwargs)
     
     def f_prime(self, r_star):
         return self.get_f_prime(r_star, self.power)

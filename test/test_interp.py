@@ -4,7 +4,7 @@ import torch
 from scipy.interpolate import RegularGridInterpolator
 import numpy as np
 
-from V1_perturb import interp
+from fr_models import interp
 
 def test_regular_grid_interpolator():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

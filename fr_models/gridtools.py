@@ -33,6 +33,10 @@ class Grid(torch.Tensor):
         return self._extents
     
     @property
+    def Ls(self):
+        return [extent[1] - extent[0] for extent in self.extents]
+    
+    @property
     def dxs(self):
         return self._dxs
     
@@ -59,6 +63,9 @@ class Grid(torch.Tensor):
         new_tensor = self.tensor.cpu(*args, **kwargs)
         return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
         
+    def clone(self, *args, **kwargs):
+        new_tensor = self.tensor.clone(*args, **kwargs)
+        return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
 #     @staticmethod
 #     def meshgrid(grids):
 #         tensors = [grid.points for grid in grids]

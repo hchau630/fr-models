@@ -8,7 +8,7 @@ from . import analytic_models as amd
 logger = logging.getLogger(__name__)
 
 class SteadyStateResponse(torch.nn.Module):
-    def __init__(self, a_model, grid, r_star, amplitude, i, j, length_scales, method='dynamic', dr_rtol=1.0e-3, dr_atol=1.0e-5, max_t=500.0, solver_kwargs=None):
+    def __init__(self, a_model, grid, r_star, amplitude, i, j, length_scales, method='dynamic', dr_rtol=1.0e-3, dr_atol=1.0e-5, max_t=500.0, solver_kwargs=None, n_model_kwargs=None, check_interpolation_range=True):
         super().__init__()
         self.a_model = a_model
         self.register_buffer('grid', grid, persistent=False) # persistent=False means don't store in state_dict
@@ -17,13 +17,15 @@ class SteadyStateResponse(torch.nn.Module):
         self.i = i # output cell type number
         self.j = j # input cell type number
         # Note: length_scale = what 1.0 in model means in the units of the data
-        length_scales = torch.as_tensor(length_scales)
+        length_scales = torch.as_tensor(length_scales, dtype=torch.float)
         self.register_buffer('length_scales', length_scales, persistent=False) # persistent=False means don't store in state_dict
         self.method = method
         self.dr_rtol = dr_rtol
         self.dr_atol = dr_atol
         self.max_t = max_t
         self.solver_kwargs = {} if solver_kwargs is None else solver_kwargs
+        self.n_model_kwargs = {} if n_model_kwargs is None else n_model_kwargs
+        self.check_interpolation_range = check_interpolation_range
         # Let's hope that pytorch will have a nn.Buffer() feature one day so we can get rid of register_buffer...
         # There is an open issue on this: https://github.com/pytorch/pytorch/issues/35735, but no progress so far...
         
@@ -35,11 +37,11 @@ class SteadyStateResponse(torch.nn.Module):
         x = x / self.length_scales
 
         dxs = torch.tensor(self.grid.dxs, dtype=torch.float, device=x.device)
-        if torch.any((torch.abs(x) < dxs) & (x != 0)):
+        if self.check_interpolation_range and torch.any((torch.abs(x) < dxs) & (x != 0)):
             raise RuntimeError("x must not be within interpolation range near 0. Try increasing number of neurons.")
                 
-        n_model = self.a_model.numerical_model(self.grid)
-        nlp_model = n_model.nonlinear_perturbed_model(self.r_star)
+        n_model = self.a_model.numerical_model(self.grid, **self.n_model_kwargs)
+        nlp_model = n_model.nonlinear_perturbed_model(self.r_star, **self.n_model_kwargs)
         
         delta_h = n_model.get_h(self.amplitude, self.j)
         delta_r0 = torch.tensor(0.0, device=delta_h.device)
@@ -69,6 +71,6 @@ class RadialSteadyStateResponse(SteadyStateResponse):
         """
         if self.a_model.ndim_s > 1:
             x_space, x_feature = x[...,:1], x[...,1:]
-            x_pad = torch.zeros((*x.shape[:-1],self.a_model.ndim_s-1))
+            x_pad = torch.zeros((*x.shape[:-1],self.a_model.ndim_s-1), device=x.device)
             x = torch.cat([x_space, x_pad, x_feature],dim=-1)
         return super().forward(x)
