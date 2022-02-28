@@ -8,26 +8,26 @@ from . import analytic_models as amd
 logger = logging.getLogger(__name__)
 
 class SteadyStateResponse(torch.nn.Module):
-    def __init__(self, a_model, grid, r_star, amplitude, i, j, length_scales, method='dynamic', dr_rtol=1.0e-3, dr_atol=1.0e-5, max_t=500.0, solver_kwargs=None, n_model_kwargs=None, check_interpolation_range=True):
+    def __init__(self, a_model, grid, r_star, amplitude, i, j, length_scales, max_t=500.0, method='dynamic', steady_state_kwargs=None, n_model_kwargs=None, check_interpolation_range=True):
         super().__init__()
-        self.a_model = a_model
-        self.register_buffer('grid', grid, persistent=False) # persistent=False means don't store in state_dict
-        self.r_star = r_star
-        self.amplitude = amplitude
-        self.i = i # output cell type number
-        self.j = j # input cell type number
+        self.a_model = a_model # should be torch.nn.Module
+        self.r_star = r_star # should be torch.nn.Parameter or optim.Parameter
+        self.amplitude = amplitude # should be torch.nn.Parameter or optim.Parameter
+        
+        # register following objects as non-persisent buffer so that model.to(device) will move all of them to device
+        # but state_dict() will not contain them, which is desirable since they are not parameters that should change
+        self.register_buffer('grid', grid, persistent=False)
+        self.register_buffer('i', torch.as_tensor(i, dtype=torch.long), persistent=False) # output cell type number
+        self.register_buffer('j', torch.as_tensor(i, dtype=torch.long), persistent=False) # input cell type number
         # Note: length_scale = what 1.0 in model means in the units of the data
-        length_scales = torch.as_tensor(length_scales, dtype=torch.float)
-        self.register_buffer('length_scales', length_scales, persistent=False) # persistent=False means don't store in state_dict
+        self.register_buffer('length_scales', torch.as_tensor(length_scales, dtype=torch.float), persistent=False)
+        self.register_buffer('max_t', torch.as_tensor(max_t, dtype=torch.float), persistent=False)
+        
         self.method = method
-        self.dr_rtol = dr_rtol
-        self.dr_atol = dr_atol
-        self.max_t = max_t
-        self.solver_kwargs = {} if solver_kwargs is None else solver_kwargs
+         
+        self.steady_state_kwargs = {} if steady_state_kwargs is None else steady_state_kwargs
         self.n_model_kwargs = {} if n_model_kwargs is None else n_model_kwargs
-        self.check_interpolation_range = check_interpolation_range
-        # Let's hope that pytorch will have a nn.Buffer() feature one day so we can get rid of register_buffer...
-        # There is an open issue on this: https://github.com/pytorch/pytorch/issues/35735, but no progress so far...
+        self.check_interpolation_range = check_interpolation_range # should always be True unless you're just testing stuff
         
     def forward(self, x):
         """
@@ -46,15 +46,7 @@ class SteadyStateResponse(torch.nn.Module):
         delta_h = n_model.get_h(self.amplitude, self.j)
         delta_r0 = torch.tensor(0.0, device=delta_h.device)
         
-        if self.method == 'dynamic':
-            t0 = torch.tensor(0.0, device=delta_h.device)
-            nlp_delta_r, nlp_t = nlp_model.steady_state(delta_h, delta_r0, t0, dr_rtol=self.dr_rtol, dr_atol=self.dr_atol, max_t=self.max_t, **self.solver_kwargs)
-        elif self.method == 'fixed':
-            t = torch.tensor(self.max_t, device=delta_h.device)
-            nlp_delta_r, nlp_t = nlp_model(delta_h, delta_r0, t, **self.solver_kwargs)
-            raise NotImplementedError() # Need to change PerturbedNonlinearModel _drdt so that we can check whether it is at steady state
-        else:
-            raise NotImplementedError()
+        nlp_delta_r, nlp_t = nlp_model.steady_state(delta_h, delta_r0, self.max_t, method=self.method, **self.steady_state_kwargs)
         
         delta_ri_curve = interp.RegularGridInterpolator.from_grid(self.grid, nlp_delta_r[self.i])
 

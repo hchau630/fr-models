@@ -7,6 +7,8 @@ import torch
 
 from . import _torch, gridtools, exceptions, timeout
 
+ADAPTIVE_SOLVERS = ['dopri8', 'dopri5', 'bosh3', 'adaptive_heun']
+
 class NumericalModel(abc.ABC, torch.nn.Module):
     def __init__(self, W):
         assert W.ndim == 2
@@ -20,7 +22,6 @@ class NumericalModel(abc.ABC, torch.nn.Module):
     def _drdt(self, t, r, h):
         return
         
-    @timeout.timeout(seconds=10)
     def forward(self, h, r0, t, event_fn=None, odeint_interface=odeint, **kwargs):
         """
         Solves an ODE with input h and initial state r0 at time stamps t.
@@ -51,6 +52,9 @@ class NumericalModel(abc.ABC, torch.nn.Module):
                    t is the event time.
                    
         """
+        if 'options' not in kwargs or ('max_num_steps' not in kwargs['options'] and 'method' in ADAPTIVE_SOLVERS):
+            kwargs['options'] = {'max_num_steps': 100} # by default, set max_num_steps to 100 if it is not provided and method is not a fixed solver.
+            
         if not callable(h):
             _h = lambda t: h
         else:
@@ -70,7 +74,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
         else:
             _r0 = r0
 
-        drdt = partial(self._drdt, h=_h)    
+        drdt = partial(self._drdt, h=_h)
         
         try:
             if event_fn is None:
@@ -86,15 +90,30 @@ class NumericalModel(abc.ABC, torch.nn.Module):
 
                 return r[-1], event_t
         except AssertionError as err:
-            # Sometimes odeint raises an error AssertionError('underflow in dt ...')
+            # Sometimes odeint raises an error AssertionError('underflow in dt ...') or AssertionError('max_num_steps exceeded ...')
             # This catches that error and re-raises the error with a more detailed 
             # explanation of that error message.
             if str(err).startswith('underflow in dt'):
                 raise exceptions.RequiredStepSizeTooSmall(f'AssertionError in odeint: {err}. This is due to the adaptive solver needing to use a step size that is too small, which in turn implies the problem is likely too stiff. See https://github.com/rtqichen/torchdiffeq/blob/master/FAQ.md')
+            if str(err).startswith('max_num_steps exceeded'):
+                raise exceptions.TimeoutError(f'AssertionError in odeint: {err}. If you wish to allow the solver to run longer, set "max_num_steps" inside the options dict to something larger')
             raise
+            
+    def steady_state(self, h, r0, max_t, method='dynamic', **kwargs):
+        if method == 'dynamic':
+            return self._steady_state_dynamic(h, r0, max_t, **kwargs)
+        elif method == 'static':
+            return self._steady_state_static(h, r0, max_t, **kwargs)
+        raise NotImplementedError("Only 'dynamic' and 'static' are valid options for the keyword argument 'method'.")
     
-    def steady_state(self, h, r0, t0, dr_rtol=1.0e-3, dr_atol=1.0e-5, max_t=500.0, **kwargs):
+    def _steady_state_dynamic(self, h, r0, max_t, dr_rtol=1.0e-3, dr_atol=1.0e-5, epsilon_t=1.0e-1, solver_kwargs=None):
+        if solver_kwargs is None:
+            solver_kwargs = {} # mutable defaults are generally bad
+            
+        assert max_t > 0
+        
         max_t = max_t*self.tau
+        epsilon_t = epsilon_t*self.tau
         
         def event_fn(t, r, h, dr_rtol=dr_rtol, dr_atol=dr_atol, max_t=max_t):
             drdt = self._drdt(t, r, h)
@@ -103,15 +122,46 @@ class NumericalModel(abc.ABC, torch.nn.Module):
             result = (1.0 - (allclose | exceeded_max_t).float()).unsqueeze(0)
             return result
             
-        r, t = self.forward(h, r0, t0, event_fn=event_fn, **kwargs)
-        
-        epsilon = 1.0e-1
-        if t >= max_t - epsilon:
+        t0 = torch.tensor(0.0, device=max_t.device)
+        r, t = self.forward(h, r0, t0, event_fn=event_fn, **solver_kwargs)
+
+        if t >= max_t - epsilon_t:
             raise exceptions.SteadyStateNotReached(f"Failed to convergence to steady state with tolerance dr_rtol={dr_rtol}, dr_atol={dr_atol} within maximum time {max_t}.")
         if t == t0:
             raise exceptions.ToleranceTooLarge("numerical model returned steady state as the inital state, probably because dr_rtol and dr_atol are too big. Try reducing those numbers.") 
             
         return r, t
+    
+    def _steady_state_static(self, h, r0, max_t, steps=10, dr_rtol=1.0e-3, dr_atol=1.0e-5, epsilon_t=1.0e-1, solver_kwargs=None):
+        """
+        max_t - torch.Tensor scalar
+        """
+        if solver_kwargs is None:
+            solver_kwargs = {} # mutable defaults are generally bad
+            
+        assert max_t > 0
+        
+        max_t = max_t*self.tau
+        epsilon_t = epsilon_t*self.tau
+        
+        t = torch.linspace(0, max_t, steps=steps+1, device=max_t.device)
+        
+        r = r0
+        for ti, tf in zip(t[:-1], t[1:]):
+            r = self.forward(h, r, torch.stack([ti, tf]), **solver_kwargs)[0][-1]
+            # compute drdt
+            dr = self.forward(h, r, torch.stack([tf, tf+epsilon_t]), **solver_kwargs)[0][-1] - r
+            
+            if torch.all(dr == torch.zeros(dr.shape, device=dr.device)):
+                raise RuntimeError("dr is exactly 0. Try increasing epsilon_t.")
+                
+            drdt = dr / epsilon_t
+            is_steady_state = _torch.allclose(drdt, torch.zeros(r.shape, device=r.device), rtol=r*dr_rtol, atol=dr_atol)
+            
+            if is_steady_state:
+                return r, tf
+        
+        raise exceptions.SteadyStateNotReached(f"Failed to convergence to steady state with tolerance dr_rtol={dr_rtol}, dr_atol={dr_atol} within maximum time {max_t}.")
         
 class MultiDimModel(NumericalModel):
     def __init__(self, W, **kwargs):
