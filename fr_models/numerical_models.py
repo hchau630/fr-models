@@ -1,6 +1,5 @@
 import abc
 from functools import partial
-import time
 
 from torchdiffeq import odeint, odeint_event
 import numpy as np
@@ -157,7 +156,7 @@ class TrivialVBModel(MultiDimModel):
     They can then get the model by discretizing the kernel on the DiscretizedManifold, which
     returns a VectorBundle which are the weights, which they can use to initialize a MultiDimModel.
     """
-    def __init__(self, W, F_dim, w_dims, use_circulant=False, **kwargs):
+    def __init__(self, W, F_dim, w_dims, **kwargs):
         """
         Args:
           - W: The weight tensor, with the first F_dim dimensions corresponding to the fiber space F, 
@@ -165,9 +164,6 @@ class TrivialVBModel(MultiDimModel):
           - F_dim: Dimensionality of the fiber space. 
           - w_dims: a list of integers denoting the dimensions (within base space B) which are 'wrapped',
                     i.e. are S^1.
-                    
-        NOTE: currently use_circulant=True seems slower than use_circulant=False, even though
-        theoretically it should be faster.
         """
         super().__init__(W, **kwargs)
         self.F_dim = F_dim
@@ -178,21 +174,7 @@ class TrivialVBModel(MultiDimModel):
         self.F_N = np.prod(self.F_shape)
         self.B_N = np.prod(self.B_shape)
         self.w_dims = w_dims
-        self.F_dims = list(range(self.F_dim))
-        self.B_dims = list(range(self.F_dim,self.F_dim+self.B_dim))
         assert all([w_dim < self.B_dim for w_dim in self.w_dims])
-        
-        self.use_circulant = use_circulant
-        if self.use_circulant:
-            block_W = self.W_expanded # (*,**,*,**), where * has F_dim elements and ** has B_dim elements.
-            initial_dims, target_dims = list(range(self.ndim, self.ndim+self.F_dim)), list(range(self.F_dim,self.F_dim*2))
-            for i, j in zip(initial_dims, target_dims):
-                block_W = block_W.moveaxis(i,j)
-                
-            self.W_block_diag = _torch.linalg.eigvalsnc(block_W, self.B_dim, keep_shape=True) # (*,*,**)
-            self.mul_W = self._mul_W_circulant
-        else:
-            self.mul_W = self._mul_W_generic
         
     def get_h(self, amplitude, F_idx, B_idx=None):
         """
@@ -223,17 +205,6 @@ class TrivialVBModel(MultiDimModel):
         
         return h
     
-    def _mul_W_generic(self, r):
-        return self.W @ r
-    
-    def _mul_W_circulant(self, r):
-        r = r.reshape(*self.shape)
-        k = torch.fft.fftn(r, dim=self.B_dims)
-        k = torch.einsum('ij...,j...->i...',self.W_block_diag, k)
-        r = torch.fft.ifftn(k, dim=self.B_dims).real # result must be real
-        r = r.reshape(-1)
-        return r
-    
 class MultiCellModel(TrivialVBModel):
     def __init__(self, W, w_dims, **kwargs):
         assert W.ndim >= 4
@@ -252,9 +223,7 @@ class FRModel(NumericalModel):
         return result
     
 class MultiCellFRModel(MultiCellModel, FRModel):
-    def _drdt(self, t, r, h):
-        result = self.f(self.mul_W(r) + h(t)) - r
-        return result
+    pass
     
 class SSNModel(FRModel):
     def __init__(self, W, power, **kwargs):
@@ -280,10 +249,6 @@ class MultiCellSSNModel(MultiCellModel, SSNModel):
             W_expanded = self.W_expanded
             w_dims = self.w_dims
         return PerturbedMultiCellSSNModel(W_expanded, r_star=r_star, w_dims=w_dims, power=self.power, **kwargs)
-    
-    def _drdt(self, t, r, h):
-        result = self.f(self.mul_W(r) + h(t)) - r
-        return result
         
 class LinearizedMultiCellSSNModel(MultiCellModel):
     def __init__(self, W, r_star, w_dims, **kwargs):
@@ -321,7 +286,7 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
             return torch.linalg.eigvals(F @ self.W).real.max()
     
     def _drdt(self, t, r, h):
-        result = self.f_prime.reshape(-1) * (self.mul_W(r) + h(t)) - r
+        result = self.f_prime.reshape(-1) * (self.W @ r + h(t)) - r
         return result
     
     def forward(self, delta_h, delta_r0, t, **kwargs):
@@ -342,7 +307,7 @@ class PerturbedMultiCellSSNModel(MultiCellSSNModel):
     @property
     def h_star(self):
         r_star = self.r_star.reshape(-1)
-        return (r_star**0.5 - self.mul_W(r_star)).reshape(self.shape)
+        return (r_star**0.5 - self.W @ r_star).reshape(self.shape)
     
     def forward(self, delta_h, delta_r0, t, **kwargs):
         if not callable(delta_h):

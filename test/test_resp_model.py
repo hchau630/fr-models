@@ -6,6 +6,7 @@ import torch
 from fr_models import response_models as rmd
 
 class TestRadialSteadyStateResponse:
+    @pytest.mark.skip(reason='use_circulant functionality currently disabled.')
     @pytest.mark.parametrize('r_model_untrained',
                              [
                                  {'ndim_s': 1, 'periodic': True},
