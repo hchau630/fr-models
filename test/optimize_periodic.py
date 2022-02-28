@@ -109,11 +109,11 @@ def get_model(device='cpu'):
         0,
         length_scale,
         max_t=500.0,
-        method='static',
-        steady_state_kwargs=dict(
-            dr_rtol=1.0e-4, 
-            dr_atol=1.0e-6,
-        )
+        # method='static',
+        # steady_state_kwargs=dict(
+        #     dr_rtol=1.0e-4, 
+        #     dr_atol=1.0e-6,
+        # )
     )
     return model
 

@@ -106,7 +106,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
             return self._steady_state_static(h, r0, max_t, **kwargs)
         raise NotImplementedError("Only 'dynamic' and 'static' are valid options for the keyword argument 'method'.")
     
-    def _steady_state_dynamic(self, h, r0, max_t, dr_rtol=1.0e-3, dr_atol=1.0e-5, epsilon_t=1.0e-1, solver_kwargs=None):
+    def _steady_state_dynamic(self, h, r0, max_t, dr_rtol=1.0e-4, dr_atol=1.0e-6, epsilon_t=1.0e-1, solver_kwargs=None):
         if solver_kwargs is None:
             solver_kwargs = {} # mutable defaults are generally bad
             
@@ -116,7 +116,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
         epsilon_t = epsilon_t*self.tau
         
         def event_fn(t, r, h, dr_rtol=dr_rtol, dr_atol=dr_atol, max_t=max_t):
-            drdt = self._drdt(t, r, h)
+            drdt = self._drdt(t, r, h) * self.tau # how much dr changes in self.tau time if we extrapolate from the infinitesimal change
             allclose = _torch.allclose(drdt, torch.zeros(r.shape, device=r.device), rtol=r*dr_rtol, atol=dr_atol)
             exceeded_max_t = t > max_t
             result = (1.0 - (allclose | exceeded_max_t).float()).unsqueeze(0)
@@ -132,7 +132,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
             
         return r, t
     
-    def _steady_state_static(self, h, r0, max_t, steps=10, dr_rtol=1.0e-3, dr_atol=1.0e-5, epsilon_t=1.0e-1, solver_kwargs=None):
+    def _steady_state_static(self, h, r0, max_t, steps=10, dr_rtol=1.0e-4, dr_atol=1.0e-6, epsilon_t=1.0e-1, solver_kwargs=None):
         """
         max_t - torch.Tensor scalar
         """
@@ -155,7 +155,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
             if torch.all(dr == torch.zeros(dr.shape, device=dr.device)):
                 raise RuntimeError("dr is exactly 0. Try increasing epsilon_t.")
                 
-            drdt = dr / epsilon_t
+            drdt = dr / epsilon_t * self.tau # how much dr changes in self.tau time if we extrapolate from the infinitesimal change
             is_steady_state = _torch.allclose(drdt, torch.zeros(r.shape, device=r.device), rtol=r*dr_rtol, atol=dr_atol)
             
             if is_steady_state:
