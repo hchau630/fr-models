@@ -178,11 +178,11 @@ class Optimizer():
 
         return wrapped_f
     
-    def make_loss_func(self, x, y):
+    def make_compute_quantities(self, x, y):
         
         @ndarray_to_tuple
         @functools.lru_cache(maxsize=self.cache_size)
-        def loss_func(params):
+        def compute_quantities(params):
             with torch.set_grad_enabled(self.use_autograd):
                 self.params = params
                 
@@ -193,46 +193,52 @@ class Optimizer():
                     logger.debug(f"Caught exception inside compute_loss: {err}")
                     
                     loss = torch.tensor(np.inf)
+                    pure_loss_item = loss.item()
+                    loss_item = pure_loss_item
                     
                 else:
                     loss = self.criterion(y_pred, y)
+                    pure_loss_item = loss.item()
+
+                    if self.regularizer is not None:
+                        loss += self.regularizer(self.model)
+                        
+                    loss_item = loss.item()
                 
-                return loss
+                if self.use_autograd:
+                    if loss.grad_fn is None: # non-differentiable
+                        grad = [np.nan for _ in range(len(params))]
+
+                    else:
+                        self.model.zero_grad()
+                        loss.backward()
+
+                        grad = self.params_grad.tolist()
+
+                    return {'pure_loss': pure_loss_item, 'loss': loss_item, 'grad': grad}
+                
+                return {'pure_loss': pure_loss_item, 'loss': loss_item}
             
+        return compute_quantities
+    
+    def make_loss_func(self, x, y, compute_quantities):
+        def loss_func(params):
+            return compute_quantities(params)['pure_loss']
         return loss_func
     
-    def make_minimizer_func(self, x, y, loss_func):
-        
+    def make_minimizer_func(self, x, y, compute_quantities):
         def minimizer_func(params):
-            loss = loss_func(params)
-            
-            if self.regularizer is not None:
-                loss += self.regularizer(self.model)
-            
-            loss_item = loss.item()
-            
+            quantities = compute_quantities(params)
             if self.use_autograd:
-                if loss_item == np.inf or loss.grad_fn is None: # either bad params or non-differentiable
-                    grad = [np.nan for _ in range(len(params))]
-                    
-                else:
-                    self.model.zero_grad()
-                    loss.backward()
-                    
-                    grad = self.params_grad.tolist()
-                    
-                return loss_item, grad
-            
-            return loss_item
-        
+                return quantities['loss'], quantities['grad']
+            return quantities['loss']
         return minimizer_func
-        
-    def make_callback(self, x, y, loss_func, hist):
+
+    def make_callback(self, x, y, loss_func, cache_func, hist):
         
         def callback(params):
             # Compute loss, hopefully result is in cache
-            loss = loss_func(params)
-            loss_item = loss.item()
+            loss_item = loss_func(params)
             
             # Compute constraints, hopefully results are in cache
             all_satisfied = True
@@ -255,7 +261,7 @@ class Optimizer():
             hist['params'].append(params)
 
             logger.info(f"Loss: {loss_item}, constraints: {constraint_values_dict}")
-            logger.debug(f"Loss func cache info: {loss_func.__wrapped__.cache_info()}")
+            logger.debug(f"Loss func cache info: {cache_func.cache_info()}")
             for constraint_name, constraint in zip(self.constraint_names, self.constraints):
                 logger.debug(f"{constraint_name} cache info: {constraint['fun'].__wrapped__.cache_info()}")
             logger.debug(self.params.detach().cpu())
@@ -270,11 +276,12 @@ class Optimizer():
         
         hist = {'loss': [], 'satisfied': [], 'params': []}
         
-        loss_func = self.make_loss_func(x, y)
-        minimizer_func = self.make_minimizer_func(x, y, loss_func)
-        callback = self.make_callback(x, y, loss_func, hist)
+        compute_quantities = self.make_compute_quantities(x, y)
+        loss_func = self.make_loss_func(x, y, compute_quantities)
+        minimizer_func = self.make_minimizer_func(x, y, compute_quantities)
+        callback = self.make_callback(x, y, loss_func, compute_quantities.__wrapped__, hist)
         
-        minimize = timeout.timeout(seconds=1000)(sp_opt.minimize)
+        minimize = timeout.timeout(seconds=self.timeout)(sp_opt.minimize)
         
         try:
             result = minimize(minimizer_func,

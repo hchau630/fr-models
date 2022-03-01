@@ -145,6 +145,7 @@ def train(model, x, y, device='cpu'):
         constraints=constraints,
         tol=1.0e-6,
         use_autograd=True,
+        timeout=1000,
         options={'maxiter': 100}
     )
     
