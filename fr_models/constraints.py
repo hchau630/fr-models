@@ -40,12 +40,12 @@ class StabilityCon(Constraint):
     @property
     def type(self):
         return Types.INEQ
-        
+    
     def forward(self, r_model):
         lp_model = r_model.a_model.numerical_model(r_model.grid).linear_perturbed_model(r_model.r_star, share_mem=True)
         
         assert lp_model.W.is_cuda
-        result = (self.max_instability - lp_model.instability(**self.kwargs)).item()
+        result = self.max_instability - lp_model.instability(**self.kwargs)
 
         return result
     
@@ -67,6 +67,6 @@ class ParadoxicalCon(Constraint):
         sub_lp_model = subcircuit_model.numerical_model(r_model.grid).linear_perturbed_model(subcircuit_r_star, share_mem=True)
         
         assert sub_lp_model.W.is_cuda
-        result = (sub_lp_model.instability(**self.kwargs) - self.min_subcircuit_instability).item()
+        result = sub_lp_model.instability(**self.kwargs) - self.min_subcircuit_instability
         
         return result

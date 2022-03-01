@@ -111,7 +111,12 @@ class Optimizer():
         self.timeout = timeout
         self.cache_size = cache_size
         
-        self.constraints = list(map(lambda c: {'type': c.type.value, 'fun': self.constraint_wrapper(c)}, constraints))
+        self.constraints = []
+        self.constraint_caches = []
+        for c in constraints:
+            constraint, constraint_cache = self.make_constraint(c)
+            self.constraints.append(constraint)
+            self.constraint_caches.append(constraint_cache)
         self.constraint_names = [type(constraint).__name__ for constraint in constraints]
     
     @property
@@ -133,7 +138,10 @@ class Optimizer():
         params_grad = []
         for name, param in self.model.named_parameters():
             if isinstance(param, Parameter) and torch.any(param.requires_optim):
-                params_grad.append(param.grad[param.requires_optim])
+                if param.grad is None: # parameter has no gradient, probably because the objective function is independent of the parameter
+                    params_grad.append(torch.zeros(len(param.requires_optim.nonzero()), device=param.device))
+                else:
+                    params_grad.append(param.grad[param.requires_optim])
         return torch.cat(params_grad)
     
     @params.setter
@@ -166,17 +174,39 @@ class Optimizer():
                 state_dict[name] = param.data
         return state_dict
     
-    def constraint_wrapper(self, f):
+    def make_compute_constraint_quantities(self, c):
         
         @ndarray_to_tuple
         @functools.lru_cache(maxsize=self.cache_size)
-        def wrapped_f(params):
-            self.params = params
-            with torch.no_grad():
-                result = f(self.model)
-                return result
+        def compute_constraint_quantities(params):
+            with torch.set_grad_enabled(self.use_autograd):
+                self.params = params
+                
+                constraint_val = c(self.model)
+                
+                if self.use_autograd:
+                    self.model.zero_grad()
+                    constraint_val.backward()
+                    
+                    grad = self.params_grad.tolist()
+                    
+                    return {'constraint_val': constraint_val.item(), 'grad': grad}
+                
+                return {'constraint_val': constraint_val.item()}
 
-        return wrapped_f
+        return compute_constraint_quantities
+    
+    def make_constraint(self, c):
+        compute_constraint_quantities = self.make_compute_constraint_quantities(c)
+        cached_func = compute_constraint_quantities.__wrapped__
+        
+        constraint_func = lambda params: compute_constraint_quantities(params)['constraint_val']
+        
+        if self.use_autograd:
+            constraint_jac = lambda params: compute_constraint_quantities(params)['grad']
+            return {'type': c.type.value, 'fun': constraint_func, 'jac': constraint_jac}, cached_func
+        
+        return {'type': c.type.value, 'fun': constraint_func}, cached_func
     
     def make_compute_quantities(self, x, y):
         
@@ -265,8 +295,8 @@ class Optimizer():
 
             logger.info(f"Loss: {loss_item}, constraints: {constraint_values_dict}")
             logger.debug(f"Loss func cache info: {cache_func.cache_info()}")
-            for constraint_name, constraint in zip(self.constraint_names, self.constraints):
-                logger.debug(f"{constraint_name} cache info: {constraint['fun'].__wrapped__.cache_info()}")
+            for constraint_name, constraint_cache in zip(self.constraint_names, self.constraint_caches):
+                logger.debug(f"{constraint_name} cache info: {constraint_cache.cache_info()}")
             logger.debug(self.params.detach().cpu())
             # logger.debug(pformat(self.state_dict()))
             
