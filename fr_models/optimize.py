@@ -234,9 +234,12 @@ class Optimizer():
             return quantities['loss']
         return minimizer_func
 
-    def make_callback(self, x, y, loss_func, cache_func, hist):
+    def make_callback(self, x, y, loss_func, cache_func, hist, start_time):
         
         def callback(params):
+            if (time_taken := time.time() - start_time) > self.timeout:
+                raise exceptions.TimeoutError(f"optimizer.optimize has been running for {time_taken} seconds and timed out.")
+                
             # Compute loss, hopefully result is in cache
             loss_item = loss_func(params)
             
@@ -275,16 +278,15 @@ class Optimizer():
         # logger.debug(pformat(self.state_dict()))
         
         hist = {'loss': [], 'satisfied': [], 'params': []}
+        start_time = time.time()
         
         compute_quantities = self.make_compute_quantities(x, y)
         loss_func = self.make_loss_func(x, y, compute_quantities)
         minimizer_func = self.make_minimizer_func(x, y, compute_quantities)
-        callback = self.make_callback(x, y, loss_func, compute_quantities.__wrapped__, hist)
-        
-        minimize = timeout.timeout(seconds=self.timeout)(sp_opt.minimize)
+        callback = self.make_callback(x, y, loss_func, compute_quantities.__wrapped__, hist, start_time)
         
         try:
-            result = minimize(minimizer_func,
+            result = sp_opt.minimize(minimizer_func,
                 self.params.tolist(),
                 method=self.method,
                 jac=self.use_autograd,
