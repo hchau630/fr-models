@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 from fr_models import kernels, gridtools
+from fr_models import analytic_models as amd
 
 @pytest.fixture
 def device():
@@ -45,6 +46,25 @@ def get_points(period):
         [period/4, period/8],
         [-period/3, period/6],
     ])
+
+def test_discretize(device):
+    period = 1.0
+    L = [1.0,1.0]
+    shape = (9,12)
+    w_dims = [1]
+
+    W = torch.tensor([
+        [0.5,-1.2],
+        [1.5,-0.6],
+    ], device=device)
+    sigma = torch.tensor([
+        [[period/3,period/5], [period/2,period/4.5]],
+        [[period/4,period/3.1], [period/2.5,period/3.5]]
+    ], device=device)
+
+    grid = gridtools.Grid(L, shape=shape, w_dims=w_dims, device=device)
+    a_model = amd.GaussianSSNModel(W, sigma, period=period, w_dims=w_dims)
+    torch.testing.assert_close(a_model.kernel.discretize(grid, has_symmetry=True), a_model.kernel.discretize(grid, has_symmetry=False))
 
 @pytest.mark.parametrize("w_dims", [([]), ([0]), ([1]), ([0,1])])
 @pytest.mark.parametrize("order", [(1),(3)])

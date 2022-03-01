@@ -29,6 +29,10 @@ class Grid(torch.Tensor):
         return self.tensor.shape[:-1]
     
     @property
+    def D(self):
+        return len(self.grid_shape)
+    
+    @property
     def extents(self):
         return self._extents
     

@@ -6,7 +6,33 @@ import torch
 from . import _torch, periodic, gridtools
 
 class Kernel(abc.ABC, torch.nn.Module):
-    def discretize(self, grid):
+    def discretize(self, grid, has_symmetry=True):
+        if has_symmetry:
+            expanded_Ls = [L if i in grid.w_dims else 2*L for i, L in enumerate(grid.Ls)]
+            expanded_shape = tuple([shape_i if i in grid.w_dims else 2*shape_i-1 for i, shape_i in enumerate(grid.grid_shape)])
+            expanded_grid = gridtools.Grid(expanded_Ls, shape=expanded_shape, w_dims=grid.w_dims, device=grid.device) # (*shape)
+            W_base = self.forward(expanded_grid.tensor, 0.0)*expanded_grid.dA # (*expanded_shape,**)
+
+            pad = [(shape_i//2-1,shape_i//2) if i in grid.w_dims else (0,0) for i, shape_i in enumerate(grid.grid_shape)] + \
+                  [(0,0) for _ in range(len(self.cov_shape))]
+            W_base = _torch.pad(W_base, pad, mode='wrap')
+
+            indices = []
+            for i, n in enumerate(grid.grid_shape):
+                indices_n = gridtools.get_grid([n,n], method='arange', device=grid.device) # (n,n,2)
+                indices_n[...,1] = indices_n[...,1] + indices_n[...,0]
+                indices_n = indices_n.flip([0])[...,1:] # (n,n,1)
+                # print(indices_n)
+                indices.append(indices_n)
+            indices = torch.cat(gridtools.meshgrid(indices), dim=-1) # (n_1,n_1,n_2,n_2,...,n_D,n_D,D)
+            dim_indices = [-1] + list(np.arange(grid.D)*2) + list(np.arange(grid.D)*2+1)
+            # print(dim_indices, indices.shape)
+            indices = indices.permute(*dim_indices) # (D,n_1,n_2,...,n_D,n_1,n_2,...,n_D)
+            indices = tuple([*indices,...]) # ((n_1,n_2,...,n_D,n_1,n_2,...,n_D), (n_1,n_2,...,n_D,n_1,n_2,...,n_D), ..., (n_1,n_2,...,n_D,n_1,n_2,...n_D), Ellipses)
+
+            W = W_base[indices]
+            return W
+        
         outer_grid_x, outer_grid_y = gridtools.meshgrid([grid.tensor,grid.tensor])
         W = self.forward(outer_grid_x,outer_grid_y)*grid.dA
         return W

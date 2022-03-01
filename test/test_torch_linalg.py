@@ -48,7 +48,7 @@ def test_eigvalsbc(device):
 
     # print(*zip(eigvals_1, eigvals_2, eigvals_2h), sep='\n')
     
-    torch.testing.assert_close(eigvals_1, eigvals_2)
+    torch.testing.assert_close(eigvals_1, eigvals_2h)
     torch.testing.assert_close(eigvals_2, eigvals_2h)
     
 def test_eigvalsbnc(device):
@@ -58,12 +58,12 @@ def test_eigvalsbnc(device):
     w_dims = [0,1]
 
     W = torch.tensor([
-        [0.5,-1.2],
-        [1.5,-0.6],
+        [0.52,-1.25],
+        [1.51,-0.64],
     ], device=device)
     sigma = torch.tensor([
-        [[period/3,period/5], [period/2,period/4.5]],
-        [[period/4,period/3.1], [period/2.5,period/3.5]]
+        [[period/3.4,period/5.2], [period/2.9,period/4.5]],
+        [[period/4.2,period/3.1], [period/2.5,period/3.5]]
     ], device=device)
 
     grid = gridtools.Grid(L, shape=shape, w_dims=w_dims, device=device)
@@ -80,5 +80,5 @@ def test_eigvalsbnc(device):
     
     # print(*zip(eigvals_1, eigvals_2, eigvals_2h), sep='\n')
 
-    torch.testing.assert_close(eigvals_1, eigvals_2)
+    torch.testing.assert_close(eigvals_1, eigvals_2h)
     torch.testing.assert_close(eigvals_2, eigvals_2h)
