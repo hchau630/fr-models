@@ -96,7 +96,7 @@ class NumericalModel(abc.ABC, torch.nn.Module):
             if str(err).startswith('underflow in dt'):
                 raise exceptions.RequiredStepSizeTooSmall(f'AssertionError in odeint: {err}. This is due to the adaptive solver needing to use a step size that is too small, which in turn implies the problem is likely too stiff. See https://github.com/rtqichen/torchdiffeq/blob/master/FAQ.md')
             if str(err).startswith('max_num_steps exceeded'):
-                raise exceptions.TimeoutError(f'AssertionError in odeint: {err}. If you wish to allow the solver to run longer, set "max_num_steps" inside the options dict to something larger')
+                raise exceptions.IterationStepsExceeded(f'AssertionError in odeint: {err}. If you wish to allow the solver to run longer, set "max_num_steps" inside the options dict to something larger')
             raise
             
     def steady_state(self, h, r0, max_t, method='dynamic', **kwargs):

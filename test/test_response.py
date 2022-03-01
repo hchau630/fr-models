@@ -49,7 +49,7 @@ def test_response(method, r_model_trained, trained_responses, device, benchmark)
     delta_r0 = torch.tensor(0.0, device=delta_h.device)
     max_t = torch.tensor(500.0, device=delta_h.device)
     
-    delta_r, t = n_model.steady_state(delta_h, delta_r0, max_t, method=method, solver_kwargs=None)
+    delta_r, t = n_model.steady_state(delta_h, delta_r0, max_t, method=method, dr_rtol=1.0e-3, dr_atol=1.0e-5, solver_kwargs=None)
     # delta_r, t = benchmark(n_model.steady_state, delta_h, delta_r0, max_t, method=method)
     delta_r = delta_r.cpu().numpy()
 

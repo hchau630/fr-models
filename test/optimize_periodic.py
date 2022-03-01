@@ -143,7 +143,6 @@ def train(model, x, y, device='cpu'):
         model,
         criterion,
         constraints=constraints,
-        callback=None,
         tol=1.0e-6,
         use_autograd=True,
         options={'maxiter': 100}

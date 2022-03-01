@@ -1,16 +1,32 @@
 import functools
 import logging
-import pprint
 import time
 
 import torch
 import numpy as np
-from scipy.optimize import minimize
+import scipy.optimize as sp_opt
 
 from . import exceptions
 from . import constraints as con
+from . import timeout
 
 logger = logging.getLogger(__name__)
+
+def ndarray_to_tuple(f):
+    @functools.wraps(f)
+    def wrapped_f(x):
+        return f(tuple(x.tolist()))
+    return wrapped_f
+
+def pformat(d, indent=0, spaces=4):
+    output = ''
+    for key, value in d.items():
+        output += ' ' * spaces * indent + str(key) + ':' + '\n'
+        if isinstance(value, dict):
+            output += pformat(value, indent+1) + '\n'
+        else:
+            output += '\n'.join([' ' * spaces * (indent+1) + line for line in str(value).split('\n')]) + '\n'
+    return output
 
 class Bounds:
     def __init__(self, epsilon=0):
@@ -75,7 +91,7 @@ class Parameter(torch.nn.Parameter):
         self.bounds = bounds
         
 class Optimizer():
-    def __init__(self, model, criterion, regularizer=None, method=None, constraints=[], tol=None, callback=None, options=None, use_autograd=True, timeout=1000):
+    def __init__(self, model, criterion, regularizer=None, method=None, constraints=[], tol=None, options=None, use_autograd=True, timeout=1000, cache_size=128):
         """
         model should be a torch.nn.Module. This function optimizes all optimizer.Parameter instances in model.
         parameters.bounds will also be used to ensure the parameter lies within bounds. 
@@ -89,13 +105,14 @@ class Optimizer():
         self.criterion = criterion
         self.regularizer = regularizer
         self.method = method
-        self.constraints = list(map(lambda c: {'type': c.type.value, 'fun': self.constraint_wrapper(c)}, constraints))
-        self.constraint_names = [type(constraint).__name__ for constraint in constraints]
         self.tol = tol
-        self.callback = callback
         self.options = options
         self.use_autograd = use_autograd
         self.timeout = timeout
+        self.cache_size = cache_size
+        
+        self.constraints = list(map(lambda c: {'type': c.type.value, 'fun': self.constraint_wrapper(c)}, constraints))
+        self.constraint_names = [type(constraint).__name__ for constraint in constraints]
     
     @property
     def params(self):
@@ -151,89 +168,116 @@ class Optimizer():
     
     def constraint_wrapper(self, f):
         
-        @functools.wraps(f)
-        def wrapped_f(params, **kwargs):
+        @ndarray_to_tuple
+        @functools.lru_cache(maxsize=self.cache_size)
+        def wrapped_f(params):
             self.params = params
             with torch.no_grad():
-                result = f(self.model, **kwargs)
+                result = f(self.model)
                 return result
 
         return wrapped_f
     
-    def compute_loss(self, x, y):
-        try:
-            y_pred = self.model(x)
-        except (exceptions.NumericalModelError, exceptions.TimeoutError) as err:
-            logger.debug(f"Caught exception inside compute_loss: {err}")
-            return torch.tensor(np.inf)
-
-        logger.debug(f"y_pred, y: {y_pred}, {y}")
-        return self.criterion(y_pred, y)
+    def make_loss_func(self, x, y):
         
-    def __call__(self, x, y):
-        logger.info("Started optimizing...")
-        logger.debug(pprint.pformat(self.state_dict()))
-        start_time = time.time()
-        
-        loss_hist = []
-        params_hist = []
-        satisfied_hist = []
-        
-        def fun(params):
+        @ndarray_to_tuple
+        @functools.lru_cache(maxsize=self.cache_size)
+        def loss_func(params):
             with torch.set_grad_enabled(self.use_autograd):
                 self.params = params
                 
-                loss = self.compute_loss(x, y)
-                if self.regularizer is not None:
-                    loss += self.regularizer(self.model)
+                try:
+                    y_pred = self.model(x)
+                    
+                except (exceptions.NumericalModelError, exceptions.TimeoutError) as err:
+                    logger.debug(f"Caught exception inside compute_loss: {err}")
+                    
+                    loss = torch.tensor(np.inf)
+                    
+                else:
+                    loss = self.criterion(y_pred, y)
+                
+                return loss
+            
+        return loss_func
+    
+    def make_minimizer_func(self, x, y, loss_func):
+        
+        def minimizer_func(params):
+            loss = loss_func(params)
+            
+            if self.regularizer is not None:
+                loss += self.regularizer(self.model)
+            
+            loss_item = loss.item()
             
             if self.use_autograd:
-                if loss.item() == np.inf:
-                    return loss.item(), [np.nan for _ in range(len(params))]
-                self.model.zero_grad()
-                loss.backward()
-                
-                return loss.item(), self.params_grad.tolist()
-            return loss.item()
+                if loss_item == np.inf or loss.grad_fn is None: # either bad params or non-differentiable
+                    grad = [np.nan for _ in range(len(params))]
+                    
+                else:
+                    self.model.zero_grad()
+                    loss.backward()
+                    
+                    grad = self.params_grad.tolist()
+                    
+                return loss_item, grad
+            
+            return loss_item
+        
+        return minimizer_func
+        
+    def make_callback(self, x, y, loss_func, hist):
         
         def callback(params):
-            if (time_taken := time.time() - start_time) > self.timeout:
-                raise exceptions.TimeoutError(f"optimizer.optimize has been running for {time_taken} seconds and timed out.")
-                
-            with torch.no_grad():
-                self.params = params
-                
-                # logger.debug(pprint.pformat(self.state_dict()))
-                
-                all_satisfied = []
-                values_dict = {}
-                
-                for i, constraint in enumerate(self.constraints):
-                    val = constraint['fun'](params)
-                    if constraint['type'] == con.Types.EQ.value:
-                        satisfied = val == 0
-                    elif constraint['type'] == con.Types.INEQ.value:
-                        satisfied = val >= 0
-                    else:
-                        raise RuntimeError()
+            # Compute loss, hopefully result is in cache
+            loss = loss_func(params)
+            loss_item = loss.item()
+            
+            # Compute constraints, hopefully results are in cache
+            all_satisfied = True
+            constraint_values_dict = {}
 
-                    values_dict[self.constraint_names[i]] = val
-                    all_satisfied.append(satisfied)
-                    
-                is_all_satisfied = all(all_satisfied)
-                
-                loss = self.compute_loss(x, y)
-                loss_hist.append(loss.item())
-                params_hist.append(params)
-                satisfied_hist.append(is_all_satisfied)
-                
-                logger.info(f"Loss: {loss.item()}, constraints: {values_dict}")
-                
-                if self.callback is not None:
-                    self.callback(self, x, y)
+            for constraint_name, constraint in zip(self.constraint_names, self.constraints):
+                val = constraint['fun'](params)
+                if constraint['type'] == con.Types.EQ.value:
+                    satisfied = val == 0
+                elif constraint['type'] == con.Types.INEQ.value:
+                    satisfied = val >= 0
+                else:
+                    raise RuntimeError()
 
+                constraint_values_dict[constraint_name] = val
+                all_satisfied = all_satisfied and satisfied
+                
+            hist['loss'].append(loss_item)
+            hist['satisfied'].append(all_satisfied)
+            hist['params'].append(params)
+
+            logger.info(f"Loss: {loss_item}, constraints: {constraint_values_dict}")
+            logger.debug(f"Loss func cache info: {loss_func.__wrapped__.cache_info()}")
+            for constraint_name, constraint in zip(self.constraint_names, self.constraints):
+                logger.debug(f"{constraint_name} cache info: {constraint['fun'].__wrapped__.cache_info()}")
+            logger.debug(self.params.detach().cpu())
+            # logger.debug(pformat(self.state_dict()))
+            
+        return callback
+        
+    def __call__(self, x, y):
+        logger.info("Started optimizing...")
+        logger.debug(self.params.detach().cpu())
+        # logger.debug(pformat(self.state_dict()))
+        
+        hist = {'loss': [], 'satisfied': [], 'params': []}
+        
+        loss_func = self.make_loss_func(x, y)
+        minimizer_func = self.make_minimizer_func(x, y, loss_func)
+        callback = self.make_callback(x, y, loss_func, hist)
+        
+        minimize = timeout.timeout(seconds=1000)(sp_opt.minimize)
+        
         try:
-            result = minimize(fun,
+            result = minimize(minimizer_func,
                 self.params.tolist(),
                 method=self.method,
                 jac=self.use_autograd,
@@ -250,18 +294,17 @@ class Optimizer():
             
         except (exceptions.NumericalModelError, exceptions.OptimizationError, exceptions.TimeoutError) as err:
             logger.info(f"Optimization failed due to exception: {err}")
-            # logger.debug("Details of the exception: ", exc_info=True)
             
-            logger.info(f"Loss hist: {loss_hist}")
-            logger.info(f"Satisfied hist: {satisfied_hist}")
+            logger.info(f"Loss hist: {hist['loss']}")
+            logger.info(f"Satisfied hist: {hist['satisfied']}")
             
-            if len(loss_hist) == 0:
-                logger.info("No result returned since len(loss_hist) = 0.")
+            if len(hist['loss']) == 0:
+                logger.info("No result returned since len(hist['loss']) = 0.")
                 return False, np.inf
             
-            loss_hist = np.array(loss_hist)
-            params_hist = np.array(params_hist)
-            satisfied_hist = np.array(satisfied_hist)
+            loss_hist = np.array(hist['loss'])
+            satisfied_hist = np.array(hist['satisfied'])
+            params_hist = np.array(hist['params'])
             
             satisfied_loss_hist = loss_hist[satisfied_hist] # get only the losses where constraint is satisfied
             satisfied_params_hist = params_hist[satisfied_hist]
@@ -272,13 +315,20 @@ class Optimizer():
                 logger.info("No result returned since len(satisfied_loss_hist) = 0.")
                 return False, np.inf
         
-            idx, min_loss = np.argmin(satisfied_loss_hist), np.min(satisfied_loss_hist)
+            idx = np.argmin(satisfied_loss_hist)
+            
             self.params = satisfied_params_hist[idx]
-            logger.info(f"Returning result during optimization. Loss: {min_loss}.")
-            return True, min_loss
+            loss = satisfied_loss_hist[idx]
+            
+            logger.info(f"Returning result during optimization. Loss: {loss}.")
+            logger.debug(self.params.detach().cpu())
+            # logger.debug(pformat(self.state_dict()))
+            return True, loss
         
-        with torch.no_grad():
-            self.params = result.x
-            loss = self.compute_loss(x, y).item()
+        self.params = result.x
+        loss = loss_func(result.x)
+        
         logger.info(f"Finished optimization successfully. Loss: {loss}")
+        logger.debug(self.params.detach().cpu())
+        # logger.debug(pformat(self.state_dict()))
         return True, loss
