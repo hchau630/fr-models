@@ -174,7 +174,10 @@ class MultiDimModel(NumericalModel):
         
         self.shape = shape
         self.ndim = W.ndim // 2
-        self.W_expanded = W
+    
+    @property
+    def W_expanded(self):
+        return self.W.reshape(*self.shape,*self.shape)
         
     def forward(self, h, r0, t, **kwargs):
         if r0.ndim != 0:

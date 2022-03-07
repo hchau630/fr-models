@@ -6,15 +6,38 @@ import torch
 from . import _torch, periodic, gridtools
 
 class Kernel(abc.ABC, torch.nn.Module):
-    def discretize(self, grid, has_symmetry=True):
-        if has_symmetry:
+    """
+    An abstract base class of 'kernels', which here just means
+    F-valued functions K(x,y), where x, y in M, where
+    M is a D-dimensional manifold (though right now I only
+    consider manifolds that gridtools.Grid represents, namely
+    manifolds that can be written as a cartesian product of 
+    R^1 and S^1), such that K(x,y) is both symmetric and 
+    translationally invariant, i.e. K(x,y) = f(y-x) for some f.
+    """
+    @property
+    @abc.abstractmethod
+    def F_shape(self):
+        pass
+    
+    @property
+    def F_ndim(self):
+        return len(self.F_shape)
+    
+    @property
+    @abc.abstractmethod
+    def D(self):
+        pass
+    
+    def discretize(self, grid, use_symmetry=True, normalize=True):
+        if use_symmetry:
             expanded_Ls = [L if i in grid.w_dims else 2*L for i, L in enumerate(grid.Ls)]
             expanded_shape = tuple([shape_i if i in grid.w_dims else 2*shape_i-1 for i, shape_i in enumerate(grid.grid_shape)])
             expanded_grid = gridtools.Grid(expanded_Ls, shape=expanded_shape, w_dims=grid.w_dims, device=grid.device) # (*shape)
-            W_base = self.forward(expanded_grid.tensor, 0.0)*expanded_grid.dA # (*expanded_shape,**)
+            W_base = self.forward(expanded_grid.tensor, 0.0) # (*expanded_shape,**)
 
             pad = [(shape_i//2-1,shape_i//2) if i in grid.w_dims else (0,0) for i, shape_i in enumerate(grid.grid_shape)] + \
-                  [(0,0) for _ in range(len(self.cov_shape))]
+                  [(0,0) for _ in range(self.F_ndim)]
             W_base = _torch.pad(W_base, pad, mode='wrap')
 
             indices = []
@@ -25,16 +48,20 @@ class Kernel(abc.ABC, torch.nn.Module):
                 # print(indices_n)
                 indices.append(indices_n)
             indices = torch.cat(gridtools.meshgrid(indices), dim=-1) # (n_1,n_1,n_2,n_2,...,n_D,n_D,D)
-            dim_indices = [-1] + list(np.arange(grid.D)*2) + list(np.arange(grid.D)*2+1)
+            dim_indices = [-1] + list(np.arange(self.D)*2) + list(np.arange(self.D)*2+1)
             # print(dim_indices, indices.shape)
             indices = indices.permute(*dim_indices) # (D,n_1,n_2,...,n_D,n_1,n_2,...,n_D)
             indices = tuple([*indices,...]) # ((n_1,n_2,...,n_D,n_1,n_2,...,n_D), (n_1,n_2,...,n_D,n_1,n_2,...,n_D), ..., (n_1,n_2,...,n_D,n_1,n_2,...n_D), Ellipses)
 
             W = W_base[indices]
-            return W
         
-        outer_grid_x, outer_grid_y = gridtools.meshgrid([grid.tensor,grid.tensor])
-        W = self.forward(outer_grid_x,outer_grid_y)*grid.dA
+        else:
+            outer_grid_x, outer_grid_y = gridtools.meshgrid([grid.tensor,grid.tensor])
+            W = self.forward(outer_grid_x,outer_grid_y)
+        
+        if normalize:
+            return W * grid.dA
+            
         return W
 
 class K_g(Kernel):
@@ -52,13 +79,18 @@ class K_g(Kernel):
         except RuntimeError:
             print(f"scale must be broadcastable to the shape {cov_shape}, but scale has shape {scale.shape}")
         
-        super().__init__()
-        self.D = cov.shape[-1]
-        self.cov_shape = cov_shape
-        
+        super().__init__()        
         self.scale = scale
         self.cov = cov
         self.normalize = normalize
+        
+    @property
+    def F_shape(self):
+        return self.cov.shape[:-2]
+    
+    @property
+    def D(self):
+        return self.cov.shape[-1]
         
     def forward(self, x, y=0.0):
         z = y - x
@@ -68,7 +100,7 @@ class K_g(Kernel):
         result = torch.exp(-0.5*torch.einsum('...i,kij,...j->...k',z, torch.linalg.inv(cov), z))
         if self.normalize:
             result = 1/((2*torch.pi)**self.D*torch.linalg.det(cov))**0.5 * result
-        result = self.scale*result.reshape(*input_shape,*self.cov_shape)
+        result = self.scale*result.reshape(*input_shape,*self.F_shape)
         return result
     
 class K_wg(K_g):
@@ -94,66 +126,50 @@ class K_wg(K_g):
         func = periodic.wrap(super().forward, self.w_dims, order=self.order, period=self.period)
         return func(z)
 
-# def discretize_K(K, Ls, shape, w_dims=[], sigma=0, device='cpu'):
-#     """
-#     Discretizes the kernel K(x,y) for a grid of neurons with shape SHAPE and lengths Ls
-#     Kernel is a torch.nn.Module, whose forward function is a function of 
-#     two torch.Tensors that returns a torch.Tensor with any shape (**),
-#     and accepts batched x and y where the shape of y-x is denoted (*), 
-#     such that the batched result has shape (*,**).
-#     Returns a torch.Tensor with shape (*shape, *shape, **)
-    
-#     Speed benchmark:
-#     When discretizing a kernel with shape (50,50), we have the following times:
-#       - device='cpu': ~0.21s
-#       - device='cuda': ~0.04s
-      
-#     IMPORTANT: BECAUSE PYTORCH DOES NOT HAVE A FUNCTIONAL PAD, I AM CURRENTLY USING np.pad
-#     IF devce='cpu', WHICH MEANS GRADIENT DOES NOT PASS THROUGH THIS FUNCTION.
-#     """ 
-#     assert len(Ls) == len(shape)
-#     N = np.prod(shape)
-#     D = len(shape)
-#     dA = gridtools.get_grid_size(Ls, shape, w_dims=w_dims)
-    
-#     K.to(device)
-    
-#     if device == 'cpu' or device == torch.device('cpu'): # significantly faster on cpu
-#         expanded_Ls = [L if i in w_dims else 2*L for i, L in enumerate(Ls)]
-#         expanded_shapes = tuple([shape[i] if i in w_dims else 2*shape[i]-1 for i in range(D)])
-#         grid = gridtools.get_grid(expanded_Ls, expanded_shapes, w_dims) # (*shape)
-#         W_base = K(grid, 0.0)*dA # (*shape,**)
-#         K_shape = W_base.shape[D:] # (**)
-#         pad = [(shape[i]//2,shape[i]//2) if i in w_dims else (0,0) for i in range(D)] + [(0,0) for _ in range(len(K_shape))]
-#         expanded_W_base = torch.from_numpy(np.pad(W_base.detach().numpy(), pad, mode='wrap')) # !! gradient cannot pass here !!
-#         # pad = utils.itertools.flatten_seq([(shape[i]//2,shape[i]//2) if i in w_dims else (0,0) for i in range(D)])
-#         # pad += utils.itertools.flatten_seq([(0,0) for _ in range(len(K_shape))])
-#         # expanded_W_base = F.pad(W_base, tuple(pad[::-1]), mode='circular')
-#         W = torch.zeros((*shape, *shape, *K_shape))
-#         mids = gridtools.get_mids(expanded_W_base.shape[:D], w_dims)
+class OuterKernel(Kernel):
+    def __init__(self, K1, K2):
+        assert K1.F_shape == K2.F_shape
         
-#         for ndidx in np.ndindex(shape):
-#             indices = tuple([slice(mids[i]-ndidx[i], mids[i]-ndidx[i]+shape[i]) for i in range(D)])
-#             W[ndidx] = expanded_W_base[indices]
-#     else:
-#         grid = gridtools.get_grid(Ls, shape, w_dims, device=device)
-#         outer_grid_x, outer_grid_y = gridtools.meshgrid([grid,grid])
-#         W = K(outer_grid_x,outer_grid_y)*dA
-            
-#     if sigma != 0:
-#         assert sigma > 0
-#         W += torch.normal(0,sigma/np.sqrt(N),size=(*shape,*shape),device=device) # can add cell-type specific sigma later
-
-#     return W
-
-# def discretize_nK(nK, Ls, shape, w_dims=[], device='cpu'):
-#     """
-#     Discretize a size (n,n) np.ndarray of kernels K(x,y), i.e. a matrix-valued function.
-#     """
-#     assert nK.ndim == 2 and nK.shape[0] == nK.shape[1]
-#     n = nK.shape[0]
-#     nK_discrete = _torch.tensor([
-#         [discretize_K(nK[i,j], Ls, shape, w_dims=w_dims, device=device) for j in range(n)] for i in range(n)
-#     ])
-#     nK_discrete = torch.moveaxis(nK_discrete, 1, 1+len(shape))
-#     return nK_discrete
+        super().__init__()
+        
+        self.K1 = K1
+        self.K2 = K2
+        
+    @property
+    def F_shape(self):
+        return self.K1.F_shape
+    
+    @property
+    def D(self):
+        return self.K1.D + self.K2.D
+        
+    def forward(self, x, y=0):
+        x1, x2 = x[...,:self.K1.D], x[...,self.K1.D:]
+        if isinstance(y, torch.Tensor) and y.ndim > 0: # y is not a scalar, its last diension should be equal to self.D
+            assert y.shape[-1] == self.D
+            y1, y2 = y[...,:self.K1.D], y[...,self.K1.D:]
+        else:
+            y1, y2 = y, y
+        return self.K1(x1, y1) * self.K2(x2, y2)
+    
+class ProductKernel(Kernel):
+    def __init__(self, K1, K2):
+        assert K1.F_shape == K2.F_shape
+        assert K1.D == K2.D
+        
+        super().__init__()
+        
+        self.K1 = K2
+        self.K2 = K2
+        
+    @property
+    def F_shape(self):
+        return self.K1.F_shape
+    
+    @property
+    def D(self):
+        return self.K1.D
+    
+    def forward(self, x, y=0):
+        return self.K1(x, y) * self.K2(x, y)
+        

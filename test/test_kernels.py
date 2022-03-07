@@ -16,25 +16,37 @@ def get_scale():
         [1.5,-0.6],
     ])
 
-def get_sigma(period):
+def get_sigma():
     return torch.tensor([
-        [[1.0, period], [0.5, period/2]],
-        [[1.5, period*2], [1.5, period/2]]
+        [[1.0, 1.0], [0.5, 0.75]],
+        [[1.5, 2.0], [1.5, 0.5]]
     ])
 
-def get_cov(period):
+def get_cov():
     return torch.tensor([
         [[[1.0, 0.0],
-          [0.0, period]],
+          [0.0, 1.0]],
          [[0.5, 0.0],
-          [0.0, period/2]]],
+          [0.0, 0.75]]],
         [[[1.5, 0.0],
-          [0.0, period*2]],
+          [0.0, 2.0]],
          [[1.5, 0.0],
-          [0.0, period/2]]],
+          [0.0, 0.5]]],
     ])**2
 
 def get_points(period):
+    if isinstance(period, list):
+        return torch.tensor([
+            [0.0,0.0],
+            [period[0]/2,0.0],
+            [0.0,period[1]/2],
+            [period[0]/2,period[1]/2],
+            [-period[0]/2,period[1]/2],
+            [period[0]/2,-period[1]/2],
+            [-period[0]/2,-period[1]/2],
+            [period[0]/4, period[1]/8],
+            [-period[0]/3, period[1]/6],
+        ])
     return torch.tensor([
         [0.0,0.0],
         [period/2,0.0],
@@ -64,18 +76,21 @@ def test_discretize(device):
 
     grid = gridtools.Grid(L, shape=shape, w_dims=w_dims, device=device)
     a_model = amd.GaussianSSNModel(W, sigma, period=period, w_dims=w_dims)
-    torch.testing.assert_close(a_model.kernel.discretize(grid, has_symmetry=True), a_model.kernel.discretize(grid, has_symmetry=False))
+    torch.testing.assert_close(a_model.kernel.discretize(grid, use_symmetry=True), a_model.kernel.discretize(grid, use_symmetry=False))
 
 @pytest.mark.parametrize("w_dims", [([]), ([0]), ([1]), ([0,1])])
 @pytest.mark.parametrize("order", [(1),(3)])
 @pytest.mark.parametrize("period", [(2*np.pi), (np.pi), (1.0)])
 def test_K_wg_1_point(w_dims, order, period, device):
     scale = get_scale().to(device)
-    sigma = get_sigma(period).to(device)
-    cov = get_cov(period).to(device)
+    sigma = get_sigma().to(device)
+    cov = get_cov().to(device)
     points = get_points(period).to(device)
     
     assert torch.allclose(torch.diag_embed(sigma**2), cov)
+    
+    if isinstance(period, list):
+        period = [period[dim] for dim in w_dims]
         
     W = kernels.K_wg(scale, cov, w_dims=w_dims, order=order, period=period)
     
@@ -100,20 +115,23 @@ def test_K_wg_1_point(w_dims, order, period, device):
             else:
                 expected *= 1/((2*np.pi)**0.5*sigma[:,:,i]) * torch.exp(-point[i]**2/(2*sigma[:,:,i]**2))
         expected *= scale
-        assert torch.allclose(W_point, expected)
+        torch.testing.assert_close(W_point, expected)
         
 @pytest.mark.parametrize("w_dims", [([]), ([0]), ([1]), ([0,1])])
 @pytest.mark.parametrize("order", [(1),(3)])
-@pytest.mark.parametrize("period", [(2*np.pi), (np.pi), (1.0)])
+@pytest.mark.parametrize("period", [(2*np.pi), (np.pi), (1.0), ([1.0,2*np.pi])])
 def test_K_wg_2_points(w_dims, order, period, device):
     scale = get_scale().to(device)
-    sigma = get_sigma(period).to(device)
-    cov = get_cov(period).to(device)
+    sigma = get_sigma().to(device)
+    cov = get_cov().to(device)
     points_x = get_points(period).to(device)
     points_y = get_points(period).to(device)
     outer_x, outer_y = gridtools.meshgrid([points_x,points_y])
     
     assert torch.allclose(torch.diag_embed(sigma**2), cov)
+    
+    if isinstance(period, list):
+        period = [period[dim] for dim in w_dims]
         
     W = kernels.K_wg(scale, cov, w_dims=w_dims, order=order, period=period)
     
@@ -127,22 +145,26 @@ def test_K_wg_2_points(w_dims, order, period, device):
             point = point_y - point_x
             for k in range(2):
                 if k in w_dims:
+                    p = period[w_dims.index(k)] if isinstance(period, list) else period
+                    
                     point_k, sign = point[k].abs(), torch.sign(point[k])
-                    point[k] = sign*torch.min(point_k, period-point_k)
+                    point[k] = sign*torch.min(point_k, p-point_k)
                     
             for k in range(2):
                 if k in w_dims:
+                    p = period[w_dims.index(k)] if isinstance(period, list) else period
+                    
                     if order == 1:
                         expected *= 1/((2*np.pi)**0.5*sigma[:,:,k]) * torch.exp(-point[k]**2/(2*sigma[:,:,k]**2))
                     elif order == 3:
                         expected *= 1/((2*np.pi)**0.5*sigma[:,:,k]) * (
                             torch.exp(-point[k]**2/(2*sigma[:,:,k]**2)) + 
-                            torch.exp(-(point[k]+period)**2/(2*sigma[:,:,k]**2)) +
-                            torch.exp(-(point[k]-period)**2/(2*sigma[:,:,k]**2))
+                            torch.exp(-(point[k]+p)**2/(2*sigma[:,:,k]**2)) +
+                            torch.exp(-(point[k]-p)**2/(2*sigma[:,:,k]**2))
                         )
                     else:
                         raise NotImplementedError()
                 else:
                     expected *= 1/((2*np.pi)**0.5*sigma[:,:,k]) * torch.exp(-point[k]**2/(2*sigma[:,:,k]**2))
             expected *= scale
-            assert torch.allclose(W_outer[i,j], expected)
+            torch.testing.assert_close(W_outer[i,j], expected)

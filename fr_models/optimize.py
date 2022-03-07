@@ -9,6 +9,7 @@ import scipy.optimize as sp_opt
 from . import exceptions
 from . import constraints as con
 from . import timeout
+import utils
 
 logger = logging.getLogger(__name__)
 
@@ -17,16 +18,6 @@ def ndarray_to_tuple(f):
     def wrapped_f(x):
         return f(tuple(x.tolist()))
     return wrapped_f
-
-def pformat(d, indent=0, spaces=4):
-    output = ''
-    for key, value in d.items():
-        output += ' ' * spaces * indent + str(key) + ':' + '\n'
-        if isinstance(value, dict):
-            output += pformat(value, indent+1) + '\n'
-        else:
-            output += '\n'.join([' ' * spaces * (indent+1) + line for line in str(value).split('\n')]) + '\n'
-    return output
 
 class Bounds:
     def __init__(self, epsilon=0):
@@ -298,14 +289,14 @@ class Optimizer():
             for constraint_name, constraint_cache in zip(self.constraint_names, self.constraint_caches):
                 logger.debug(f"{constraint_name} cache info: {constraint_cache.cache_info()}")
             logger.debug(self.params.detach().cpu())
-            # logger.debug(pformat(self.state_dict()))
+            # logger.debug(utils.pprint.pformat(self.state_dict()))
             
         return callback
         
     def __call__(self, x, y):
         logger.info("Started optimizing...")
-        logger.debug(self.params.detach().cpu())
-        # logger.debug(pformat(self.state_dict()))
+        # logger.debug(self.params.detach().cpu())
+        logger.debug(utils.pprint.pformat(self.state_dict()))
         
         hist = {'loss': [], 'satisfied': [], 'params': []}
         start_time = time.time()
@@ -361,7 +352,7 @@ class Optimizer():
             
             logger.info(f"Returning result during optimization. Loss: {loss}.")
             logger.debug(self.params.detach().cpu())
-            # logger.debug(pformat(self.state_dict()))
+            # logger.debug(utils.pprint.pformat(self.state_dict()))
             return True, loss
         
         self.params = result.x
@@ -369,5 +360,5 @@ class Optimizer():
         
         logger.info(f"Finished optimization successfully. Loss: {loss}")
         logger.debug(self.params.detach().cpu())
-        # logger.debug(pformat(self.state_dict()))
+        # logger.debug(utils.pprint.pformat(self.state_dict()))
         return True, loss

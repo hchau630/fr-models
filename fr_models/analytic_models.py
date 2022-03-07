@@ -137,7 +137,7 @@ class SpatialSSNModel(GaussianSSNModel):
         expanded_sigma_s = sigma_s.expand((ndim_s, *W.shape)).moveaxis(0,-1)
         if sigma_f is None:
             return expanded_sigma_s
-        return torch.cat([expanded_sigma_s, expanded_sigma_f],dim=-1)
+        return torch.cat([expanded_sigma_s, sigma_f],dim=-1)
     
     @property
     def sigma(self):

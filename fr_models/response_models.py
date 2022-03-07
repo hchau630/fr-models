@@ -4,11 +4,12 @@ import logging
 from . import interp
 from . import exceptions
 from . import analytic_models as amd
+from . import gridtools
 
 logger = logging.getLogger(__name__)
 
 class SteadyStateResponse(torch.nn.Module):
-    def __init__(self, a_model, grid, r_star, amplitude, i, j, length_scales, max_t=500.0, method='dynamic', steady_state_kwargs=None, n_model_kwargs=None, check_interpolation_range=True):
+    def __init__(self, a_model, grid, r_star, amplitude, i, j, length_scales, max_t=500.0, avg_dims=None, method='dynamic', steady_state_kwargs=None, n_model_kwargs=None, check_interpolation_range=True):
         super().__init__()
         self.a_model = a_model # should be torch.nn.Module
         self.r_star = r_star # should be torch.nn.Parameter or optim.Parameter
@@ -23,6 +24,11 @@ class SteadyStateResponse(torch.nn.Module):
         self.register_buffer('length_scales', torch.as_tensor(length_scales, dtype=torch.float), persistent=False)
         self.register_buffer('max_t', torch.as_tensor(max_t, dtype=torch.float), persistent=False)
         
+        self.avg_dims = avg_dims
+        if self.avg_dims is not None:
+            self.data_dims = [dim for dim in range(self.grid.D) if dim not in self.avg_dims]
+        else:
+            self.data_dims = list(range(self.grid.D))
         self.method = method
          
         self.steady_state_kwargs = {} if steady_state_kwargs is None else steady_state_kwargs
@@ -31,15 +37,8 @@ class SteadyStateResponse(torch.nn.Module):
         
     def forward(self, x):
         """
-        x - shape (*batch_shape, a_model.ndim)
-        """
-        # preprocess x to scale it according to length scale
-        x = x / self.length_scales
-
-        dxs = torch.tensor(self.grid.dxs, dtype=torch.float, device=x.device)
-        if self.check_interpolation_range and torch.any((torch.abs(x) < dxs) & (x != 0)):
-            raise RuntimeError("x must not be within interpolation range near 0. Try increasing number of neurons.")
-                
+        x - shape (*batch_shape, len(self.data_dims))
+        """      
         n_model = self.a_model.numerical_model(self.grid, **self.n_model_kwargs)
         nlp_model = n_model.nonlinear_perturbed_model(self.r_star, **self.n_model_kwargs)
         
@@ -48,7 +47,21 @@ class SteadyStateResponse(torch.nn.Module):
         
         nlp_delta_r, nlp_t = nlp_model.steady_state(delta_h, delta_r0, self.max_t, method=self.method, **self.steady_state_kwargs)
         
-        delta_ri_curve = interp.RegularGridInterpolator.from_grid(self.grid, nlp_delta_r[self.i])
+        if self.avg_dims is not None:
+            nlp_delta_r = nlp_delta_r.mean(dim=[1+dim for dim in self.avg_dims]) # add 1 because we don't average over the cell types dimension
+            
+            grid = gridtools.Grid([self.grid.extents[dim] for dim in self.data_dims], shape=tuple([self.grid.grid_shape[dim] for dim in self.data_dims]), w_dims=[dim for dim in self.grid.w_dims if dim in self.data_dims], device=self.grid.tensor.device)
+        else:
+            grid = self.grid
+        
+        # preprocess x to scale it according to length scale
+        x = x / self.length_scales[self.data_dims]
+
+        dxs = torch.as_tensor(grid.dxs, dtype=torch.float, device=x.device)
+        if self.check_interpolation_range and torch.any((torch.abs(x) < dxs) & (x != 0)):
+            raise RuntimeError("x must not be within interpolation range near 0. Try increasing number of neurons.")
+          
+        delta_ri_curve = interp.RegularGridInterpolator.from_grid(grid, nlp_delta_r[self.i])
 
         return delta_ri_curve(x)
     

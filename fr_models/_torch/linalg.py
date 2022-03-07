@@ -103,7 +103,7 @@ def eigvalsbc(A, hermitian=False, check=False, keep_shape=False):
     """
     return eigvalsbnc(A, 1, hermitian=hermitian, check=check, keep_shape=keep_shape)
 
-def eigvalsbnc(A, ndim, hermitian=False, check=False, keep_shape=False):
+def eigvalsbnc(A, ndim, hermitian=False, check=False, keep_shape=False, epsilon=1.0e-16):
     """
     Fast eigenvalues computation for block n-circulant matrices.
     A has shape (*,n,N_1,N_2,...,N_ndim,n,N_1,N_2,...,N_ndim)
@@ -144,6 +144,7 @@ def eigvalsbnc(A, ndim, hermitian=False, check=False, keep_shape=False):
     A = A.moveaxis(batch_ndim+1+ndim, batch_ndim+1) # (*,n,n,N_1,N_2,...,N_ndim,N_1,N_2,...,N_ndim)
     eigvals = eigvalsnc(A, ndim, hermitian=hermitian, check=check, keep_shape=keep_shape) # (*,n,n,**)
     eigvals = eigvals.moveaxis(batch_ndim+1,-1).moveaxis(batch_ndim,-2) # (*,**,n,n)
+    eigvals = eigvals + torch.diag_embed(torch.normal(0.0, 1.0, eigvals.shape[:-1], device=eigvals.device))*epsilon # prevent 0 eigenvalues, which cause backward pass to fail
     eigvals = torch.linalg.eigvals(eigvals) # (*,**,n)
     
     if keep_shape:
