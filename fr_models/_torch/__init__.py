@@ -1,2 +1,2 @@
 from .core import *
-from . import linalg, utils
+from . import linalg, utils, integrate, stats

@@ -12,6 +12,14 @@ import utils
 
 DATA_PATH = '/home/hc3190/ken/fr-models/test/data'
 
+def pytest_sessionstart(session):
+    """
+    Disable using TF32 cores on Ampere devices (e.g. A40), since that reduces precision so much that
+    a lot of the tests will fail. pytest_sessionstart is a method that runs before tests are run
+    """
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+
 def load_exp_data(filepath, x_cutoff=300.0, symmetric=False, normalize=None):
     data = np.loadtxt(filepath, delimiter=',')
     x_data, y_data, y_data_sem = data[0], data[1], data[2]
@@ -59,6 +67,7 @@ def r_model_untrained(request):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     length_scale = 575.0 # 1.0 unit in model = 575.0 microns
+    length_scales = [length_scale]*ndim_s
     
     # W
     W = torch.nn.Parameter(
@@ -116,7 +125,7 @@ def r_model_untrained(request):
         amplitude, 
         0, 
         0,
-        length_scale,
+        length_scales,
     )
     
     return r_model
@@ -135,6 +144,8 @@ def r_model_trained(request):
     model_data, exp_data = get_data(data['path'])
     W_pop, sigma_pop, amplitude, r_star, Ls, shape, w_dims = model_data
     x_data, y_data, new_y_data, x_scale = exp_data
+    
+    length_scales = [x_scale]*sigma_pop.shape[-1]
 
     W = torch.nn.Parameter(torch.tensor(W_pop, dtype=torch.float), requires_grad=False)
     sigma = torch.nn.Parameter(torch.tensor(sigma_pop, dtype=torch.float), requires_grad=False)
@@ -148,7 +159,7 @@ def r_model_trained(request):
         amplitude, 
         0, 
         0,
-        x_scale,
+        length_scales,
     )
     
     return r_model

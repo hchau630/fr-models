@@ -3,6 +3,9 @@ import enum
 
 import torch
 
+from fr_models import numerical_models as nmd
+from fr_models import _torch
+
 class Types(enum.Enum):
     EQ = 'eq' # return value from constraint.forward must be = 0
     INEQ = 'ineq' # return value from constraint.forward must be >= 0
@@ -61,12 +64,26 @@ class ParadoxicalCon(Constraint):
         return Types.INEQ
         
     def forward(self, r_model):
-        subcircuit_cell_types = [i for i in range(r_model.a_model.n) if i != self.cell_type]
-        subcircuit_model = r_model.a_model.sub_model(subcircuit_cell_types)
-        subcircuit_r_star = r_model.r_star[torch.tensor(subcircuit_cell_types)]
-        sub_lp_model = subcircuit_model.numerical_model(r_model.grid).linear_perturbed_model(subcircuit_r_star, share_mem=True)
+        lp_model = r_model.a_model.numerical_model(r_model.grid).linear_perturbed_model(r_model.r_star, share_mem=True)
+        
+        cell_types = [i for i in range(r_model.a_model.n) if i != self.cell_type]
+        
+        sub_W = _torch.take(lp_model.W_expanded[cell_types], cell_types, dim=lp_model.ndim)
+        sub_r_star = lp_model._r_star[cell_types]
+        
+        assert sub_W.shape == (len(cell_types),*lp_model.B_shape,len(cell_types),*lp_model.B_shape)
+        
+        sub_lp_model = nmd.LinearizedMultiCellSSNModel(sub_W, sub_r_star, lp_model.w_dims)
         
         assert sub_lp_model.W.is_cuda
         result = sub_lp_model.instability(**self.kwargs) - self.min_subcircuit_instability
+        
+#         subcircuit_cell_types = [i for i in range(r_model.a_model.n) if i != self.cell_type]
+#         subcircuit_model = r_model.a_model.sub_model(subcircuit_cell_types)
+#         subcircuit_r_star = r_model.r_star[torch.tensor(subcircuit_cell_types)]
+#         sub_lp_model = subcircuit_model.numerical_model(r_model.grid).linear_perturbed_model(subcircuit_r_star, share_mem=True)
+        
+#         assert sub_lp_model.W.is_cuda
+#         result = sub_lp_model.instability(**self.kwargs) - self.min_subcircuit_instability
         
         return result

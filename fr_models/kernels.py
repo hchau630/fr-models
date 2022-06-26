@@ -30,10 +30,15 @@ class Kernel(abc.ABC, torch.nn.Module):
         pass
     
     def discretize(self, grid, use_symmetry=True, normalize=True):
+        # check that grid is consistent with kernel
+        assert grid.D == self.D # assert number of dimensions match
+        if len(grid.w_dims) > 0 or hasattr(self, 'w_dims'):
+            assert grid.w_dims == self.w_dims
+        
         if use_symmetry:
             expanded_Ls = [L if i in grid.w_dims else 2*L for i, L in enumerate(grid.Ls)]
             expanded_shape = tuple([shape_i if i in grid.w_dims else 2*shape_i-1 for i, shape_i in enumerate(grid.grid_shape)])
-            expanded_grid = gridtools.Grid(expanded_Ls, shape=expanded_shape, w_dims=grid.w_dims, device=grid.device) # (*shape)
+            expanded_grid = gridtools.Grid(expanded_Ls, shape=expanded_shape, w_dims=grid.w_dims, device=grid.device, dtype=grid.dtype) # (*shape)
             W_base = self.forward(expanded_grid.tensor, 0.0) # (*expanded_shape,**)
 
             pad = [(shape_i//2-1,shape_i//2) if i in grid.w_dims else (0,0) for i, shape_i in enumerate(grid.grid_shape)] + \
@@ -95,13 +100,31 @@ class K_g(Kernel):
     def forward(self, x, y=0.0):
         z = y - x
         input_shape = z.shape[:-1]
-        
+
         cov = self.cov.reshape(-1,self.D,self.D)
         result = torch.exp(-0.5*torch.einsum('...i,kij,...j->...k',z, torch.linalg.inv(cov), z))
         if self.normalize:
             result = 1/((2*torch.pi)**self.D*torch.linalg.det(cov))**0.5 * result
         result = self.scale*result.reshape(*input_shape,*self.F_shape)
         return result
+    
+class K_g_space(K_g): # better name would probably be K_g_iid
+    def __init__(self, ndim_s, scale, sigma, normalize=True):
+        super().__init__(scale, self.compute_cov(sigma, ndim_s), normalize=normalize)
+        self.sigma = sigma
+        self.ndim_s = ndim_s
+        
+    @staticmethod
+    def compute_cov(sigma, ndim_s):
+        return torch.diag_embed(sigma.reshape(*sigma.shape,1).expand(*sigma.shape,ndim_s)**2)
+    
+    @property
+    def cov(self):
+        return self.compute_cov(self.sigma, self.ndim_s)
+    
+    @cov.setter
+    def cov(self, value):
+        pass
     
 class K_wg(K_g):
     """
@@ -121,9 +144,63 @@ class K_wg(K_g):
         self.order = order
         self.period = period
         
+    def dist(self, x, y=0):
+        return periodic.dist(x, y, self.w_dims, period=self.period)
+        
     def forward(self, x, y=0):
-        z = periodic.dist(x, y, self.w_dims, period=self.period)
+        z = self.dist(x, y)
         func = periodic.wrap(super().forward, self.w_dims, order=self.order, period=self.period)
+        return func(z)
+    
+class K_exp(Kernel):
+    """
+    An exponential kernel. Note that this is not meant for an exponential distribution, which is only
+    1-dimensional and is defined on the positive real axis.
+    """
+    
+    @property
+    def F_shape(self):
+        return tuple()
+    
+    @property
+    def D(self):
+        return len(self.sigma)
+    
+    def __init__(self, scale, sigma):
+        assert sigma.ndim == 1
+        super().__init__()
+        self.scale = scale
+        self.sigma = sigma
+        
+    def forward(self, x, y=0):
+        z = torch.abs(y-x)
+        return self.scale*torch.exp(-(z/self.sigma).norm(dim=-1))
+    
+class WrappedKernel(Kernel):
+    def __init__(self, kernel, w_dims=None, order=3, period=2*torch.pi):
+        super().__init__()
+        if w_dims is None:
+            w_dims = []
+        self.kernel = kernel
+        self.w_dims = w_dims
+        self.order = order
+        self.period = period
+        
+    @property
+    def F_shape(self):
+        return self.kernel.F_shape
+    
+    @property
+    def D(self):
+        return self.kernel.D
+    
+        
+    def dist(self, x, y=0):
+        return periodic.dist(x, y, self.w_dims, period=self.period)
+        
+    def forward(self, x, y=0):
+        z = self.dist(x, y)
+        func = periodic.wrap(self.kernel.forward, self.w_dims, order=self.order, period=self.period)
         return func(z)
 
 class OuterKernel(Kernel):
@@ -159,7 +236,7 @@ class ProductKernel(Kernel):
         
         super().__init__()
         
-        self.K1 = K2
+        self.K1 = K1
         self.K2 = K2
         
     @property
@@ -172,4 +249,4 @@ class ProductKernel(Kernel):
     
     def forward(self, x, y=0):
         return self.K1(x, y) * self.K2(x, y)
-        
+       

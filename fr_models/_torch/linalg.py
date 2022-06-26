@@ -46,7 +46,7 @@ def _eigvalsc(A, dims, hermitian=False, check=False):
     A = A.moveaxis(dims[1],-1).moveaxis(dims[0],-2)
     
     if check:
-        assert _is_circulant(A).all()
+        assert is_circulant(A).all()
         if hermitian:
             assert torch.allclose(A, A.transpose(-1,-2).conj())
     

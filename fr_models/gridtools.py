@@ -70,6 +70,14 @@ class Grid(torch.Tensor):
     def clone(self, *args, **kwargs):
         new_tensor = self.tensor.clone(*args, **kwargs)
         return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
+    
+    def double(self, *args, **kwargs):
+        new_tensor = self.tensor.double(*args, **kwargs)
+        return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
+    
+    def float(self, *args, **kwargs):
+        new_tensor = self.tensor.float(*args, **kwargs)
+        return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
 #     @staticmethod
 #     def meshgrid(grids):
 #         tensors = [grid.points for grid in grids]
@@ -109,10 +117,10 @@ def get_mids(shape, w_dims=None):
         w_dims = []
     D = len(shape)
     if not all([shape[d] % 2 == 0 if d in w_dims else shape[d] % 2 == 1 for d in range(D)]):
-        raise ValueError("the given shape does not have a center point")
+        raise ValueError(f"the given shape {shape} with w_dims {w_dims} does not have a center point")
     return tuple([shape[d]//2 if d in w_dims else (shape[d]-1)//2 for d in range(D)])
 
-def get_grid(extents, shape=None, dxs=None, w_dims=None, method='linspace', device='cpu'):
+def get_grid(extents, shape=None, dxs=None, w_dims=None, method='linspace', device='cpu', dtype=None):
     """
     Get a grid (i.e. a tensor with shape (n_1, n_2, ..., n_N, n_1+...+n_N) where grid[*idx,:] are coordinates)
     by specifying the extents in each dimension and the shape (n_1, ..., n_N).
@@ -156,10 +164,10 @@ def get_grid(extents, shape=None, dxs=None, w_dims=None, method='linspace', devi
     if method == 'linspace':
         extents = [extent if isinstance(extent, tuple) else (-extent/2, extent/2) for extent in extents]
         endpoints = [False if i in w_dims else True for i in range(len(extents))]
-        grids_per_dim = [_torch.linspace(extent[0],extent[1],N,endpoint,device=device) for extent, N, endpoint in zip(extents, shape, endpoints)]
+        grids_per_dim = [_torch.linspace(extent[0],extent[1],N,endpoint,device=device,dtype=dtype) for extent, N, endpoint in zip(extents, shape, endpoints)]
     elif method == 'arange':
         extents = [extent if isinstance(extent, tuple) else (0, extent) for extent in extents]
-        grids_per_dim = [torch.arange(extent[0],extent[1],dx,device=device) for extent, dx in zip(extents, dxs)]
+        grids_per_dim = [torch.arange(extent[0],extent[1],dx,device=device,dtype=dtype) for extent, dx in zip(extents, dxs)]
     else:
         raise NotImplementedError()
         

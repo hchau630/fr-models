@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 import numpy as np
 import torch
 
@@ -6,10 +7,90 @@ import utils
 from fr_models import analytic_models as amd
 from fr_models import geom
 
-def kernel_1D(kern, dpcurve, fig=None, ax=None, labels=None):
-    if (fig is None and ax is not None) or (fig is not None and ax is None):
-        raise ValueError("User must either provide both fig and ax together or none of them.")
+def scaterr(x, y, yerr, ax=None, **kwargs):
+    if ax is None:
+        ax = plt.gca()
     
+    return ax.errorbar(x.tolist(), y.tolist(), yerr=yerr.tolist(), marker='.', ls='none', **kwargs)
+
+def field_1D(field, grid, dim, length_scales=None, half=True, shift=0, ax=None, label=None):
+    assert field.shape == grid.grid_shape
+    
+    if ax is None:
+        ax = plt.gca()
+        
+    indices = list(grid.mids)
+    if half:
+        indices[dim] = slice(indices[dim] + shift, None)
+    else:
+        indices[dim] = slice(shift, None)
+    indices = tuple(indices)
+    
+    if length_scales is not None:
+        x = grid.tensor[indices][...,dim] * length_scales[dim]
+    else:
+        x = grid.tensor[indices][...,dim]
+    
+    line, = ax.plot(x.tolist(), field[indices].tolist(), label=label)
+    
+    return line
+
+def field_2D(field, grid=None, mask=None, mode='imshow', cscheme='diverging', indexing='xy', ax=None, **kwargs):
+    if grid is not None:
+        assert grid.shape[-1] == 2 and grid.ndim == 3
+        
+    assert indexing in ['xy', 'ij']
+    
+    if mode == 'contourf' and indexing != 'xy':
+        raise ValueError("when mode == 'imshow', indexing must be 'xy'.")
+    
+    if ax is None:
+        ax = plt.gca()
+        
+    if mask is not None:
+        field[mask] = np.nan
+        
+    if cscheme == 'diverging':
+        cmap = 'bwr'
+        norm = colors.CenteredNorm()
+    elif cscheme == 'cyclic':
+        cmap = 'hsv'
+        norm = None
+    else:
+        raise NotImplementedError()
+        
+    if mode == 'imshow':
+        assert grid.shape[:-1] == field.shape
+        extent = None
+        if grid is not None:
+            dx = grid[1,0,0].item() - grid[0,0,0].item()
+            dy = grid[0,1,1].item() - grid[0,0,1].item()
+            extent = [
+                grid[0,0,0].item() - dx/2,
+                grid[-1,0,0].item() + dx/2,
+                grid[0,0,1].item() - dy/2,
+                grid[0,-1,1].item() + dy/2,
+            ]
+        if indexing == 'xy':
+            origin = 'lower'
+            field = field.t()
+        else:
+            origin = 'upper'
+            
+        im = ax.imshow(field.cpu().numpy(), cmap=cmap, interpolation='none', norm=norm, extent=extent, origin=origin, **kwargs)
+        
+    elif mode == 'contourf':
+        assert grid is not None
+        im = ax.contourf(grid[...,0].cpu().numpy(), grid[...,1].cpu().numpy(), field.cpu().numpy(), cmap=cmap, **kwargs)
+    
+    else:
+        raise NotImplementedError()
+        
+    ax.set_aspect('equal')
+    
+    return im
+
+def kernel_1D(kern, dpcurve, ax=None, labels=None):
     x = dpcurve.t
     y = kern(dpcurve.points).reshape(len(x),-1).t()
     
@@ -17,7 +98,7 @@ def kernel_1D(kern, dpcurve, fig=None, ax=None, labels=None):
     y = y.detach().cpu().numpy()
     
     if ax is None:
-        fig, ax = utils.plot.subplots(1,1)
+        ax = plt.gca()
         
     if labels is not None:
         labels = np.array(labels)
@@ -32,29 +113,37 @@ def kernel_1D(kern, dpcurve, fig=None, ax=None, labels=None):
             
     ax.legend()
     
-    return fig, ax, lines
+    return lines
 
-def a_model_kernel_1D(a_model, dim, lims=None, unit='a.u.', fig=None, ax=None, labels=None, device='cpu'):
-    assert isinstance(a_model, amd.GaussianSSNModel)
+def a_model_kernel_1D(a_model, dim, lims=None, steps=50, unit='a.u.', ax=None, labels=None, device='cpu'):
+    assert isinstance(a_model, amd.SSNModel)
     
-    if dim in a_model.w_dims:
-        if isinstance(a_model.period, list) or isinstance(a_model.period, tuple):
-            period = a_model.period[a_model.w_dims.index(dim)]
+    if lims is None:
+        if dim in a_model.w_dims:
+            if isinstance(a_model.period, list) or isinstance(a_model.period, tuple):
+                period = a_model.period[a_model.w_dims.index(dim)]
+            else:
+                period = a_model.period
+            lims = [-period/2, period/2]
+        elif hasattr(a_model, 'sigma'):
+            three_sigma = a_model.sigma[...,dim].max().item()*3
+            lims = [-three_sigma, three_sigma]
         else:
-            period = a_model.period
-        lims = [-period/2, period/2]
+            raise RuntimeError("lims must be provided if dim does not correspond to a circular dimension and a_model does not have sigma")
     else:
-        three_sigma = a_model.sigma[...,dim].max().item()*3
-        lims = [-three_sigma, three_sigma]
+        assert len(lims) == 2
     
-    t = torch.linspace(lims[0], lims[1], steps=50, device=device)
+    t = torch.linspace(lims[0], lims[1], steps=steps, device=device)
     w = torch.zeros(a_model.ndim)
     w[dim] = 1.0
     pline = geom.curve.PLine(w)
     pline.to(device)
     dpcurve = geom.curve.DPCurve(t, pline(t))
     
-    fig, ax, lines = kernel_1D(a_model.kernel, dpcurve, fig=fig, ax=ax, labels=labels)
+    lines = kernel_1D(a_model.kernel, dpcurve, ax=ax, labels=labels)
+    
+    if ax is None:
+        ax = plt.gca()
         
     if unit == 'a.u.':
         length_scale = 1.0
@@ -70,10 +159,16 @@ def a_model_kernel_1D(a_model, dim, lims=None, unit='a.u.', fig=None, ax=None, l
         line.set_xdata(xdata*length_scale)
     ax.relim()
         
-    return fig, ax, lines
+    return lines
 
-def r_model_kernel_1D(r_model, dim, lims=None, unit='microns', fig=None, ax=None, labels=None, device='cpu'):
-    fig, ax, lines = a_model_kernel_1D(r_model.a_model, dim, lims=lims, unit='a.u.', fig=fig, ax=ax, labels=labels, device=device)
+def r_model_kernel_1D(r_model, dim, lims=None, steps=50, unit='microns', ax=None, labels=None, device='cpu'):
+    if lims == 'boundary':
+        lims = r_model.grid.extents[dim]
+    
+    lines = a_model_kernel_1D(r_model.a_model, dim, lims=lims, steps=steps, unit='a.u.', fig=fig, ax=ax, labels=labels, device=device)
+    
+    if ax is None:
+        ax = plt.gca()
     
     length_scales = r_model.length_scales.detach().cpu().numpy()
     if len(length_scales) == 1:
@@ -94,7 +189,7 @@ def r_model_kernel_1D(r_model, dim, lims=None, unit='microns', fig=None, ax=None
         line.set_xdata(xdata*length_scale)
     ax.relim()
         
-    return fig, ax, lines
+    return lines
 
 def kernel_2D(kern, dplane):
     pass

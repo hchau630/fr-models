@@ -337,6 +337,19 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
         else:
             F = torch.diag(self.f_prime.reshape(-1))
             return torch.linalg.eigvals(F @ self.W).real.max()
+        
+    def response_matrix(self, use_circulant=False):
+        # F = torch.diag(self.f_prime.reshape(-1))
+        # if use_circulant:
+        #     FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*shape,n,*shape)
+        # else:
+        #     FW = torch.diag(self.f_prime.reshape(-1)) @ self.W
+        # test_inputs = torch.eye(X
+        F = torch.diag(self.f_prime.reshape(-1))
+        FW = F @ self.W
+        I = torch.eye(FW.shape[0], device=FW.device)
+        R = torch.linalg.inv(I - FW) @ F
+        return R
     
     def _drdt(self, t, r, h):
         result = self.f_prime.reshape(-1) * (self.W @ r + h(t)) - r
@@ -345,6 +358,12 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     def forward(self, delta_h, delta_r0, t, **kwargs):
         delta_r, t = super().forward(delta_h, delta_r0, t, **kwargs)
         return delta_r, t
+    
+    def steady_state(self, delta_h, delta_r0=None, max_t=None, method='dynamic', **kwargs):
+        if method == 'theory':
+            return (self.response_matrix() @ delta_h.reshape(-1)).reshape(self.shape), np.inf
+        else:
+            return super().steady_state(delta_h, delta_r0, max_t, method=method, **kwargs)
         
 class PerturbedMultiCellSSNModel(MultiCellSSNModel):
     def __init__(self, W, r_star, w_dims, power, **kwargs):

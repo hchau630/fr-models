@@ -11,16 +11,8 @@ class AnalyticModel(abc.ABC, torch.nn.Module):
     @abc.abstractmethod
     def numerical_model(self, *args):
         pass
-
-class GaussianSSNModel(AnalyticModel):
-    # TODO: In the future, make a gaussian_ssn.py module with the static method being functions
-    # in the module so that they can share the same name as the instance methods of GaussianSSNModel
-    @staticmethod
-    def get_W_f(W, sigma):
-        def W_f(k):
-            return W*torch.exp(-0.5*torch.einsum('ijk,...k->...ij',sigma**2,k**2))
-        return W_f
     
+class SSNModel(AnalyticModel):
     @staticmethod
     def get_f_prime(r_star, power=2):
         """
@@ -28,33 +20,84 @@ class GaussianSSNModel(AnalyticModel):
         """
         assert torch.all(r_star >= 0)
         return power*r_star**((power-1)/power)
-    
-    def sub_model(self, cell_types):
-        """
-        Returns a sub-system consisting of only the cell types in the cell_types
-        """
-        cell_types = tuple(cell_types)
-        W = self.W[cell_types,:][:,cell_types]
-        sigma = self.sigma[cell_types,:][:,cell_types]
-        return GaussianSSNModel(W, sigma, power=self.power, w_dims=self.w_dims.copy(), wn_order=self.wn_order, period=self.period)
-    
-    def __init__(self, W, sigma, power=2, w_dims=None, wn_order=9, period=2*torch.pi):
+
+    def __init__(self, n, ndim, power=2, w_dims=None, period=2*torch.pi):
         super().__init__()
         
         if w_dims is None:
             w_dims = []
             
+        self.n = n # number of cell types
+        self.ndim = ndim # number of spatial/feature dimensions
+        self.power = power
+        self.w_dims = w_dims
+        self.period = period
+    
+#     @property
+#     @abc.abstractmethod
+#     def kernel(self):
+#         pass
+    
+#     def numerical_model(self, grid, **kwargs):
+#         W_discrete = self.kernel.discretize(grid) # (*shape, *shape, n, n)
+#         W_discrete = W_discrete.moveaxis(-2, 0).moveaxis(-1, 1+self.ndim) # (n, *shape, n, *shape)
+#         return nmd.MultiCellSSNModel(W_discrete, w_dims=self.w_dims, power=self.power, **kwargs)
+    
+    def f_prime(self, r_star):
+        return self.get_f_prime(r_star, self.power)
+    
+class KernelBasedSSNModel(SSNModel):
+    @property
+    @abc.abstractmethod
+    def kernel(self):
+        pass
+    
+    def numerical_model(self, grid, **kwargs):
+        W_discrete = self.kernel.discretize(grid) # (*shape, *shape, n, n)
+        W_discrete = W_discrete.moveaxis(-2, 0).moveaxis(-1, 1+self.ndim) # (n, *shape, n, *shape)
+        return nmd.MultiCellSSNModel(W_discrete, w_dims=self.w_dims, power=self.power, **kwargs)
+    
+class KernelSSNModel(KernelBasedSSNModel):
+    def __init__(self, kernel, power=2):
+        assert kernel.F_ndim == 2 # assume kernel is a function from R^D to R^{nxn}, where n is number of cell types
+        n = kernel.F_shape[0]
+        ndim = kernel.D
+        if hasattr(kernel, 'w_dims'):
+            w_dims = kernel.w_dims
+        else:
+            w_dims = []
+        if hasattr(kernel, 'period'):
+            period = kernel.period
+        else:
+            period = 2*torch.pi
+        super().__init__(n, ndim, power=power, w_dims=w_dims, period=period)
+        self._kernel = kernel
+    
+    @property
+    def kernel(self):
+        return self._kernel
+
+class GaussianSSNModel(KernelBasedSSNModel):
+    # TODO: In the future, make a gaussian_ssn.py module with the static method being functions
+    # in the module so that they can share the same name as the instance methods of GaussianSSNModel
+    @staticmethod
+    def get_W_f(W, sigma):
+        def W_f(k):
+            return W*torch.exp(-0.5*torch.einsum('ijk,...k->...ij',sigma**2,k**2))
+        return W_f
+
+    def __init__(self, W, sigma, power=2, w_dims=None, wn_order=9, period=2*torch.pi):
         assert W.ndim == 2 and W.shape[0] == W.shape[1]
         assert sigma.ndim == W.ndim + 1 and sigma.shape[:2] == W.shape
         
+        n = W.shape[0]
+        ndim = sigma.shape[-1]
+        
+        super().__init__(n, ndim, power=power, w_dims=w_dims, period=period)
+        
         self.W = W
         self.sigma = sigma
-        self.power = power
-        self.w_dims = w_dims
         self.wn_order = wn_order
-        self.period = period
-        self.n = W.shape[0] # number of cell types
-        self.ndim = sigma.shape[-1] # number of spatial/feature dimensions
     
     @property
     def kernel(self):
@@ -64,15 +107,7 @@ class GaussianSSNModel(AnalyticModel):
         scale = self.W
         cov = torch.diag_embed(self.sigma**2)
         return kernels.K_wg(scale, cov, w_dims=self.w_dims, order=self.wn_order, period=self.period)
-        
-    def numerical_model(self, grid, **kwargs):
-        W_discrete = self.kernel.discretize(grid) # (*shape, *shape, n, n)
-        W_discrete = W_discrete.moveaxis(-2, 0).moveaxis(-1, 1+self.ndim) # (n, *shape, n, *shape)
-        return nmd.MultiCellSSNModel(W_discrete, w_dims=self.w_dims, power=self.power, **kwargs)
-    
-    def f_prime(self, r_star):
-        return self.get_f_prime(r_star, self.power)
-    
+
     def max_eigval(self, r_star, criterion, trials=1, init_dist=torch.distributions.Normal(0.0, 1.0)):
         if not (r_star.ndim == 1 and len(r_star) == self.n):
             raise NotImplementedError("max_eigval currently only supports uniform r_star.")
@@ -148,38 +183,3 @@ class SpatialSSNModel(GaussianSSNModel):
         # Need to define a empty setter so that in super().__init__() the statement 'self.sigma = sigma'
         # won't throw an error.
         pass 
-    
-# class SpatialSSNModel(AnalyticModel):
-#     def __init__(self, W, sigma_s, ndim_s, sigma_f=None, power=2, w_dims=None, wn_order=9, period=2*torch.pi):
-#         super().__init__()
-        
-#         if w_dims is None:
-#             w_dims = []
-            
-#         assert W.ndim == 2 and W.shape[0] == W.shape[1]
-#         assert sigma_s.ndim == W.ndim and sigma_s.shape == W.shape
-#         if sigma_f is not None:
-#             assert sigma_f.ndim == W.ndim + 1 and sigma_f.shape[:2] == W.shape
-        
-#         self.W = W
-#         self.sigma_s = sigma_s
-#         self.sigma_f = sigma_f
-#         self.ndim_s = ndim_s # number of spatial dimensions
-#         self.ndim_f = sigma_f.shape[-1] if sigma_f is not None else 0 # number of feature dimensions
-#         self.power = power
-#         self.w_dims = w_dims
-#         self.wn_order = wn_order
-#         self.period = period
-#         self.n = W.shape[0] # number of cell types
-#         self.ndim = self.ndim_s + self.ndim_f # number of spatial/feature dimensions
-    
-#     @property
-#     def sigma(self):
-#         expanded_sigma_s = self.sigma_s.expand((self.ndim_s, *self.W.shape)).moveaxis(0,-1)
-#         if self.sigma_f is None:
-#             return expanded_sigma_s
-#         return torch.cat([expanded_sigma_s, expanded_sigma_f],dim=-1)
-    
-#     def numerical_model(self, grid):
-#         a_model = GaussianSSNModel(self.W, self.sigma, power=self.power, w_dims=self.w_dims, wn_order=self.wn_order, period=self.period)
-#         return a_model.numerical_model(grid)

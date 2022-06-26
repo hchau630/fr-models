@@ -66,7 +66,7 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
         for i in range(grid.ndim-1):
             p = grid.slice(i)
             if i in grid.w_dims:
-                p = torch.cat([p, p[:1]])
+                p = torch.cat([p, -p[:1]])
             points.append(p)
         values = _torch.pad(values, [(0,1) if i in grid.w_dims else (0,0) for i in range(values.ndim)], mode='wrap')
         return cls(points, values)
@@ -91,7 +91,9 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
             
             if not all([torch.all(within_bounds[i]).item() for i in range(n)]):
                 description = '\n'.join([f"Dimension {i} - bad indices: {torch.nonzero(~within_bounds[i])}, bad values: {points_to_interp[~within_bounds[i]]}" for i in range(n)])
-                raise ValueError(f"points_to_interp contain out of bounds values: \n {description}")
+                raise ValueError(f"points_to_interp contain out of bounds values:\n" \
+                                 f"bounds: {bounds}\n" \
+                                 f"{description}")
             
         else:
             raise NotImplementedError()

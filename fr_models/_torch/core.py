@@ -3,13 +3,25 @@
 import torch
 from fr_models import gridtools
 
-__all__ = ['linspace', 'pad', 'tensor', 'isclose', 'allclose', 'isequal']
+__all__ = ['linspace', 'take', 'pad', 'block', 'tensor', 'isclose', 'allclose', 'isequal', 'nanstd', 'stderr', 'nanstderr']
 
 def linspace(start, end, steps, endpoint=True, **kwargs):
     if endpoint:
         return torch.linspace(start, end, steps, **kwargs)
     else:
         return torch.linspace(start, end, steps+1, **kwargs)[:-1] # exclude endpoint
+    
+def take(tensor, indices, dim=None):
+    """
+    Current torch.take does not have dim argument like numpy
+    """
+    if dim is None:
+        return torch.take(tensor, indices)
+    else:
+        assert isinstance(dim, int)
+        dim = dim % tensor.ndim
+        ind = tuple([slice(None)]*dim+[indices])
+        return tensor[ind]
     
 def pad(tensor, pad_width, mode='wrap'):
     if mode != 'wrap':
@@ -27,6 +39,14 @@ def pad(tensor, pad_width, mode='wrap'):
     result = tensor[tuple(indices)]
     
     return result
+
+def block(tensors):
+    """
+    similar to np.block, but treats the first n-2 dimensions as batch dimensions. Requires tensor.ndim >= 2 for each tensor in tensors
+    and requires tensors to have ndim = 2
+    """
+    tensors = [torch.cat(tensor, dim=-1) for tensor in tensors]
+    return torch.cat(tensors, dim=-2)
     
 def tensor(data, **kwargs):
     """
@@ -60,3 +80,12 @@ def allclose(*args, **kwargs):
 def isequal(x, dim=-1, rtol=1.0e-5, atol=1.0e-8):
     x = x.moveaxis(dim,-1)
     return isclose(x[...,:-1], x[...,1:], rtol=rtol, atol=atol).all(dim=-1)
+
+def nanstd(x, *args, **kwargs):
+    return x[~torch.isnan(x)].std(*args, **kwargs)
+
+def stderr(x):
+    return x.std() / x.numel()**0.5
+
+def nanstderr(x):
+    return nanstd(x) / x[~torch.isnan(x)].numel()**0.5

@@ -121,6 +121,7 @@ def test_K_wg_1_point(w_dims, order, period, device):
 @pytest.mark.parametrize("order", [(1),(3)])
 @pytest.mark.parametrize("period", [(2*np.pi), (np.pi), (1.0), ([1.0,2*np.pi])])
 def test_K_wg_2_points(w_dims, order, period, device):
+    torch.set_printoptions(precision=20)
     scale = get_scale().to(device)
     sigma = get_sigma().to(device)
     cov = get_cov().to(device)
@@ -143,12 +144,17 @@ def test_K_wg_2_points(w_dims, order, period, device):
         for j, point_y in enumerate(points_y):
             expected = 1.0
             point = point_y - point_x
+            print('before: ', point)
             for k in range(2):
                 if k in w_dims:
                     p = period[w_dims.index(k)] if isinstance(period, list) else period
-                    
-                    point_k, sign = point[k].abs(), torch.sign(point[k])
-                    point[k] = sign*torch.min(point_k, p-point_k)
+                    point_k = point[k] + p/2
+                    point_k = point_k % p
+                    point_k = point_k - p/2
+                    point[k] = point_k
+                    # point_k, sign = point[k].abs(), torch.sign(point[k])
+                    # point[k] = sign*torch.min(point_k, p-point_k)
+            # print('after: ', point)
                     
             for k in range(2):
                 if k in w_dims:
