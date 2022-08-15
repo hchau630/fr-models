@@ -47,7 +47,7 @@ def wrap(f, w_dims, order=3, period=2*torch.pi, mode='parallel'):
         elif mode == 'sequential':
             # slow but low GPU memory usage
             result = 0
-            for k in np.ndindex([order]*len(w_dims)):
+            for k in np.ndindex(tuple([order]*len(w_dims))):
                 dx = torch.zeros(x.shape[-1], device=device)
                 dx[w_dims] = period * (torch.as_tensor(k, device=device) - (order - 1)//2)
                 result += f(x + dx)

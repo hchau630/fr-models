@@ -42,7 +42,7 @@ def field_2D(field, grid=None, mask=None, mode='imshow', cscheme='diverging', in
     assert indexing in ['xy', 'ij']
     
     if mode == 'contourf' and indexing != 'xy':
-        raise ValueError("when mode == 'imshow', indexing must be 'xy'.")
+        raise ValueError("when mode == 'contourf', indexing must be 'xy'.")
     
     if ax is None:
         ax = plt.gca()
@@ -115,7 +115,7 @@ def kernel_1D(kern, dpcurve, ax=None, labels=None):
     
     return lines
 
-def a_model_kernel_1D(a_model, dim, lims=None, steps=50, unit='a.u.', ax=None, labels=None, device='cpu'):
+def a_model_kernel_1D(a_model, dim, lims=None, steps=50, unit=None, length_scale=1.0, ax=None, labels=None, device='cpu'):
     assert isinstance(a_model, amd.SSNModel)
     
     if lims is None:
@@ -145,7 +145,9 @@ def a_model_kernel_1D(a_model, dim, lims=None, steps=50, unit='a.u.', ax=None, l
     if ax is None:
         ax = plt.gca()
         
-    if unit == 'a.u.':
+    if unit is None:
+        pass
+    elif unit == 'a.u.':
         length_scale = 1.0
         ax.set_xlabel('$\Delta$ distance (a.u.)')
     elif unit == 'degrees':

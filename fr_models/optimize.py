@@ -69,17 +69,56 @@ class Parameter(torch.nn.Parameter):
             requires_grad = requires_optim
         return super().__new__(cls, data, requires_grad)
     
-    def __init__(self, data, requires_optim=True, bounds=None):
+    def __init__(self, data, requires_optim=True, bounds=None, custom_name=None, length_scale=1.0):
         if isinstance(requires_optim, bool):
             if requires_optim:
                 requires_optim = torch.ones(data.shape, dtype=torch.bool)
             else:
                 requires_optim = torch.zeros(data.shape, dtype=torch.bool)
-        self.requires_optim = requires_optim
+        self._requires_optim = requires_optim
         if bounds is None:
             bounds = torch.stack([-torch.ones(data.shape)*np.inf, torch.ones(data.shape)*np.inf],dim=-1)
         bounds = bounds.expand((*data.shape,2)) # broadcast
         self.bounds = bounds
+        self.custom_name = custom_name
+        self._length_scale = length_scale
+        
+    @property
+    def scaled_data(self):
+        return self.data * self.length_scale
+    
+    @scaled_data.setter
+    def scaled_data(self, value):
+        with torch.no_grad():
+            self.data.copy_(value / self.length_scale)
+            
+    @property
+    def scaled_bounds(self):
+        return self.bounds * self.length_scale
+    
+    @scaled_bounds.setter
+    def scaled_bounds(self, value):
+        with torch.no_grad():
+            self.bounds = value / self.length_scale
+    
+    @property
+    def length_scale(self):
+        return self._length_scale
+    
+    @length_scale.setter
+    def length_scale(self, value):
+        self._length_scale = value
+        with torch.no_grad():
+            self.data.copy_(self.scaled_data / value)
+        
+    @property
+    def requires_optim(self):
+        return self._requires_optim
+    
+    @requires_optim.setter
+    def requires_optim(self, value):
+        self.requires_grad = torch.any(value).item()
+        self._requires_optim = value
         
 class Optimizer():
     def __init__(self, model, criterion, regularizer=None, method=None, constraints=[], tol=None, options=None, use_autograd=True, timeout=1000, cache_size=128):

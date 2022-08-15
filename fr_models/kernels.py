@@ -177,7 +177,7 @@ class K_exp(Kernel):
         return self.scale*torch.exp(-(z/self.sigma).norm(dim=-1))
     
 class WrappedKernel(Kernel):
-    def __init__(self, kernel, w_dims=None, order=3, period=2*torch.pi):
+    def __init__(self, kernel, w_dims=None, order=3, period=2*torch.pi, mode='parallel'):
         super().__init__()
         if w_dims is None:
             w_dims = []
@@ -185,6 +185,7 @@ class WrappedKernel(Kernel):
         self.w_dims = w_dims
         self.order = order
         self.period = period
+        self.mode = mode
         
     @property
     def F_shape(self):
@@ -200,7 +201,7 @@ class WrappedKernel(Kernel):
         
     def forward(self, x, y=0):
         z = self.dist(x, y)
-        func = periodic.wrap(self.kernel.forward, self.w_dims, order=self.order, period=self.period)
+        func = periodic.wrap(self.kernel.forward, self.w_dims, order=self.order, period=self.period, mode=self.mode)
         return func(z)
 
 class OuterKernel(Kernel):
@@ -249,4 +250,25 @@ class ProductKernel(Kernel):
     
     def forward(self, x, y=0):
         return self.K1(x, y) * self.K2(x, y)
+       
+class SumKernel(Kernel):
+    def __init__(self, K1, K2):
+        assert K1.F_shape == K2.F_shape
+        assert K1.D == K2.D
+        
+        super().__init__()
+        
+        self.K1 = K1
+        self.K2 = K2
+        
+    @property
+    def F_shape(self):
+        return self.K1.F_shape
+    
+    @property
+    def D(self):
+        return self.K1.D
+    
+    def forward(self, x, y=0):
+        return self.K1(x, y) + self.K2(x, y)
        

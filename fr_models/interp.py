@@ -1,7 +1,6 @@
 from itertools import product
 
 import torch
-import torch_interpolations
 
 from . import _torch
 
@@ -58,10 +57,11 @@ class BaseRegularGridInterpolator:
         denominator = torch.prod(torch.stack(overalls), dim=0)
         return numerator / denominator
 
-# class RegularGridInterpolator(torch_interpolations.RegularGridInterpolator):
 class RegularGridInterpolator(BaseRegularGridInterpolator):
     @classmethod
     def from_grid(cls, grid, values):
+        assert grid.grid_shape == values.shape
+        
         points = []
         for i in range(grid.ndim-1):
             p = grid.slice(i)
@@ -71,7 +71,7 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
         values = _torch.pad(values, [(0,1) if i in grid.w_dims else (0,0) for i in range(values.ndim)], mode='wrap')
         return cls(points, values)
     
-    def __call__(self, points_to_interp, bounds_error=True):
+    def __call__(self, points_to_interp, exclude=None, bounds_error=True):
         # For some reason the guy who made this package decided
         # he would ignore the call signature of scipy's RegularGridInterpolator
         # and ignore usual conventions of putting the batch dimensions
@@ -81,9 +81,18 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
         # This slight wrapper accepts a normal input, namely that
         # points_to_interp is a tensor of shape (...,n), where n is the number of dimensions
         # and returns a results of shape (...)
-        # Also adds bounds_error option
+        # Also adds exclude and bounds_error option
+        assert points_to_interp.ndim > 1
         batch_shape = points_to_interp.shape[:-1]
         n = points_to_interp.shape[-1]
+        
+        if exclude is not None:
+            for p_idx in exclude:
+                assert len(p_idx) == self.n
+                lb = torch.as_tensor([self.points[i][max(p_idx[i]-1,0)] for i in range(self.n)], device=points_to_interp.device)
+                ub = torch.as_tensor([self.points[i][min(p_idx[i]+1,len(self.points[i])-1)] for i in range(self.n)], device=points_to_interp.device)
+                if torch.any(mask := ((points_to_interp > lb) & (points_to_interp < ub))):
+                    raise ValueError(f"Point(s) {points_to_interp[mask]} is (are) within the excluded box at {p_idx}: {lb.tolist(), ub.tolist()}")
         
         if bounds_error:
             bounds = [(p.min(), p.max()) for p in self.points]
@@ -103,3 +112,6 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
         result = super().__call__(points_to_interp)
         result = result.reshape(batch_shape)
         return result
+    
+def interp(grid, values):
+    return RegularGridInterpolator.from_grid(grid, values)

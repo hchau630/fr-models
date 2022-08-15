@@ -20,6 +20,29 @@ class Grid(torch.Tensor):
         self._dA = np.prod(self._dxs)
         self._w_dims = w_dims
         
+    @classmethod
+    def from_x(cls, x, w_dims=None, device=None):
+        if w_dims is None:
+            w_dims = []
+        
+        if x.ndim == 1:
+            x = x[:,None]
+            
+        assert x.ndim - 1 == x.shape[-1]
+        D = x.shape[-1]
+            
+        extents = [[x[...,i].min().item(), x[...,i].max().item()] for i in range(D)]
+        for i in w_dims:
+            extents[i][1] = extents[i][1] + (extents[i][1] - extents[i][0])/(x.shape[i] - 1)
+        extents = [tuple(extent) for extent in extents]
+        grid = cls(extents, shape=x.shape[:-1], w_dims=w_dims, device=device)
+        
+        # if not (grid.tensor == x).all():
+        if not torch.allclose(grid.tensor, x):
+            raise ValueError("x is not a grid.")
+        
+        return grid
+        
     @property
     def tensor(self):
         return self.as_subclass(torch.Tensor) # return a pure torch.Tensor without all the extra attribute

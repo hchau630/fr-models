@@ -81,7 +81,8 @@ def test_discretize(device):
 @pytest.mark.parametrize("w_dims", [([]), ([0]), ([1]), ([0,1])])
 @pytest.mark.parametrize("order", [(1),(3)])
 @pytest.mark.parametrize("period", [(2*np.pi), (np.pi), (1.0)])
-def test_K_wg_1_point(w_dims, order, period, device):
+@pytest.mark.parametrize("mode", [('parallel'),('sequential')])
+def test_K_wg_1_point(w_dims, order, period, mode, device):
     scale = get_scale().to(device)
     sigma = get_sigma().to(device)
     cov = get_cov().to(device)
@@ -92,7 +93,14 @@ def test_K_wg_1_point(w_dims, order, period, device):
     if isinstance(period, list):
         period = [period[dim] for dim in w_dims]
         
-    W = kernels.K_wg(scale, cov, w_dims=w_dims, order=order, period=period)
+    # W = kernels.K_wg(scale, cov, w_dims=w_dims, order=order, period=period)
+    W = kernels.WrappedKernel(
+        kernels.K_g(scale, cov),
+        w_dims=w_dims,
+        order=order, 
+        period=period,
+        mode=mode,
+    )
     
     W_points = W(points)
     
@@ -120,7 +128,8 @@ def test_K_wg_1_point(w_dims, order, period, device):
 @pytest.mark.parametrize("w_dims", [([]), ([0]), ([1]), ([0,1])])
 @pytest.mark.parametrize("order", [(1),(3)])
 @pytest.mark.parametrize("period", [(2*np.pi), (np.pi), (1.0), ([1.0,2*np.pi])])
-def test_K_wg_2_points(w_dims, order, period, device):
+@pytest.mark.parametrize("mode", [('parallel'),('sequential')])
+def test_K_wg_2_points(w_dims, order, period, mode, device):
     torch.set_printoptions(precision=20)
     scale = get_scale().to(device)
     sigma = get_sigma().to(device)
@@ -134,7 +143,14 @@ def test_K_wg_2_points(w_dims, order, period, device):
     if isinstance(period, list):
         period = [period[dim] for dim in w_dims]
         
-    W = kernels.K_wg(scale, cov, w_dims=w_dims, order=order, period=period)
+    # W = kernels.K_wg(scale, cov, w_dims=w_dims, order=order, period=period)
+    W = kernels.WrappedKernel(
+        kernels.K_g(scale, cov),
+        w_dims=w_dims,
+        order=order, 
+        period=period,
+        mode=mode,
+    )
     
     W_outer = W(outer_x, outer_y)
     
