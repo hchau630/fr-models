@@ -84,7 +84,7 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
         # Also adds exclude and bounds_error option
         assert points_to_interp.ndim > 1
         batch_shape = points_to_interp.shape[:-1]
-        n = points_to_interp.shape[-1]
+        assert points_to_interp.shape[-1] == self.n, f'{points_to_interp.shape=}, but {self.n=}'
         
         if exclude is not None:
             for p_idx in exclude:
@@ -96,10 +96,10 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
         
         if bounds_error:
             bounds = [(p.min(), p.max()) for p in self.points]
-            within_bounds = [(bounds[i][0] <= points_to_interp[...,i]) & (points_to_interp[...,i] <= bounds[i][1]) for i in range(n)]
+            within_bounds = [(bounds[i][0] <= points_to_interp[...,i]) & (points_to_interp[...,i] <= bounds[i][1]) for i in range(self.n)]
             
-            if not all([torch.all(within_bounds[i]).item() for i in range(n)]):
-                description = '\n'.join([f"Dimension {i} - bad indices: {torch.nonzero(~within_bounds[i])}, bad values: {points_to_interp[~within_bounds[i]]}" for i in range(n)])
+            if not all([torch.all(within_bounds[i]).item() for i in range(self.n)]):
+                description = '\n'.join([f"Dimension {i} - bad indices: {torch.nonzero(~within_bounds[i])}, bad values: {points_to_interp[~within_bounds[i]]}" for i in range(self.n)])
                 raise ValueError(f"points_to_interp contain out of bounds values:\n" \
                                  f"bounds: {bounds}\n" \
                                  f"{description}")
@@ -107,8 +107,8 @@ class RegularGridInterpolator(BaseRegularGridInterpolator):
         else:
             raise NotImplementedError()
         
-        points_to_interp = points_to_interp.reshape(-1, n).T.contiguous() # .contiguous() suppresses a warning
-        points_to_interp = [points_to_interp[i] for i in range(n)]
+        points_to_interp = points_to_interp.reshape(-1, self.n).T.contiguous() # .contiguous() suppresses a warning
+        points_to_interp = [points_to_interp[i] for i in range(self.n)]
         result = super().__call__(points_to_interp)
         result = result.reshape(batch_shape)
         return result

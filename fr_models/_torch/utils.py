@@ -23,3 +23,14 @@ class TensorStruct:
     def cpu(self, *args, **kwargs):
         for name, tensor in self.__tensors.items():
             setattr(self, name, tensor.cpu(*args, **kwargs))
+
+class TensorDict(dict):
+    def to(self, *args, **kwargs):
+        for k, v in self.items():
+            self[k] = v.to(*args, **kwargs)
+        return self
+    
+    def cpu(self, *args, **kwargs):
+        for k, v in self.items():
+            self[k] = v.cpu(*args, **kwargs)
+        return self

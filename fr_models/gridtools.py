@@ -37,9 +37,7 @@ class Grid(torch.Tensor):
         extents = [tuple(extent) for extent in extents]
         grid = cls(extents, shape=x.shape[:-1], w_dims=w_dims, device=device)
         
-        # if not (grid.tensor == x).all():
-        if not torch.allclose(grid.tensor, x):
-            raise ValueError("x is not a grid.")
+        torch.testing.assert_close(grid.tensor, x, rtol=1.0e-6, atol=2.0e-5)
         
         return grid
         

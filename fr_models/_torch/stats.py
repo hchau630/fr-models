@@ -23,7 +23,7 @@ def bucketize(y, N_bins=50, mode='edge', ymin=None, ymax=None, device=None):
         indices = torch.bucketize(y, grid_edges.tensor.squeeze(), right=True) - 1
         
     elif mode == 'wrap':
-        grid_centers, indices = bucketize(y, N_bins=N_bins+1, mode='mid', device=device)
+        grid_centers, indices = bucketize(y, N_bins=N_bins+1, mode='mid', ymin=ymin, ymax=ymax, device=device)
         indices[indices == N_bins] = 0 # Treat last bin and first bin as the same bin
         grid_centers = gridtools.Grid(grid_centers.extents, shape=(N_bins,), w_dims=[0], device=device)
         return grid_centers, indices
@@ -35,7 +35,19 @@ def bucketize(y, N_bins=50, mode='edge', ymin=None, ymax=None, device=None):
     
     return grid_centers, indices
 
-def bucketize_n(y, shape=(50,), mode=None, ymin=None, ymax=None, device=None):
+def bucketize_n(y, mode=None, grid=None, shape=None, ymin=None, ymax=None, device=None):
+    if grid is not None:
+        assert (mode is None) and (shape is None) and (ymin is None) and (ymax is None)
+        mode = ['mid'] * grid.D
+        for w_dim in grid.w_dims:
+            mode[w_dim] = 'wrap'
+        shape = grid.grid_shape
+        ymin = [extent[0] for extent in grid.extents]
+        ymax = [extent[1] for extent in grid.extents]
+    
+    if shape is None:
+        shape = (50,)
+    
     n = len(shape)
     assert y.shape[-1] == n
     

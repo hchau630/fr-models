@@ -10,8 +10,8 @@ setup(
         'scipy',
         'torch',
         # 'torchdiffeq',
-        'torch_interpolations @ git+https://www.github.com/sbarratt/torch_interpolations',
-        'hyc-utils',
+        # 'torch_interpolations @ git+https://www.github.com/sbarratt/torch_interpolations',
+        'hyc-utils>=0.4.7',
     ],
     extras_require={
         'test': ['pytest', 'pytest-benchmark'],
