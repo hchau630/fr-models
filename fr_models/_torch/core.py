@@ -1,9 +1,13 @@
 #  A module containing functions with pytorch backend that behave like numpy functions
 
 import torch
+import numpy as np
+
 from fr_models import gridtools
 
-__all__ = ['linspace', 'take', 'pad', 'block', 'tensor', 'isclose', 'allclose', 'isequal', 'nanstd', 'stderr', 'nanstderr']
+import utils
+
+__all__ = ['linspace', 'take', 'pad', 'block', 'tensor', 'isclose', 'allclose', 'isequal', 'isconst', 'nanstd', 'stderr', 'nanstderr']
 
 def linspace(start, end, steps, endpoint=True, **kwargs):
     if endpoint:
@@ -23,22 +27,28 @@ def take(tensor, indices, dim=None):
         ind = tuple([slice(None)]*dim+[indices])
         return tensor[ind]
     
-def pad(tensor, pad_width, mode='wrap'):
-    if mode != 'wrap':
-        raise NotImplementedError()
-        
+def pad(tensor, pad_width, mode='wrap', const=0):
     device = tensor.device
-    indices = gridtools.get_grid(
-        [(-pad_width[i][0],tensor.shape[i]+pad_width[i][1]) for i in range(tensor.ndim)], 
-        method='arange',
-        device=device
-    )
-    indices = torch.moveaxis(indices, -1, 0)
-    for dim in range(len(indices)):
-        indices[dim] = indices[dim] % tensor.shape[dim]
-    result = tensor[tuple(indices)]
     
-    return result
+    if mode == 'const':
+        result = torch.ones([tensor.shape[i]+pad_width[i][0]+pad_width[i][1] for i in range(tensor.ndim)], device=device, dtype=tensor.dtype)*const
+        indices = tuple([slice(pad_width[i][0] if pad_width[i][0] != 0 else None,-pad_width[i][1] if pad_width[i][1] != 0 else None) for i in range(tensor.ndim)])
+        result[indices] = tensor
+        
+        return result
+    if mode == 'wrap':
+        indices = gridtools.get_grid(
+            [(-pad_width[i][0],tensor.shape[i]+pad_width[i][1]) for i in range(tensor.ndim)], 
+            method='arange',
+            device=device
+        )
+        indices = torch.moveaxis(indices, -1, 0)
+        for dim in range(len(indices)):
+            indices[dim] = indices[dim] % tensor.shape[dim]
+        result = tensor[tuple(indices)]
+
+        return result
+    raise NotImplementedError()
 
 def block(tensors):
     """
@@ -77,15 +87,34 @@ def isclose(x, y, rtol=1.0e-5, atol=1.0e-8):
 def allclose(*args, **kwargs):
     return isclose(*args, **kwargs).all()
 
+@utils.functools.deprecated
 def isequal(x, dim=-1, rtol=1.0e-5, atol=1.0e-8):
     x = x.moveaxis(dim,-1)
     return isclose(x[...,:-1], x[...,1:], rtol=rtol, atol=atol).all(dim=-1)
 
+def isconst(x, dim=None, **kwargs):
+    if dim is None:
+        x = x.reshape(-1)
+    else:
+        if isinstance(dim, int):
+            dim = [dim]
+        dim = sorted([d % x.ndim for d in dim])[::-1]
+        for d in dim:
+            x = x.movedim(d,-1)
+        x = x.flatten(start_dim=-len(dim))
+    return torch.isclose(x[...,:-1], x[...,1:], **kwargs).all(dim=-1)
+
 def nanstd(x, *args, **kwargs):
-    return x[~torch.isnan(x)].std(*args, **kwargs)
+    raise NotImplementedError()
+    # return x[~torch.isnan(x)].std(*args, **kwargs) # does not work with dim
 
-def stderr(x):
-    return x.std() / x.numel()**0.5
+def stderr(x, dim=None, unbiased=True):
+    if dim is None:
+        numel = x.numel()
+    else:
+        numel = np.prod(x.shape[tuple(dim)])
+    return x.std(dim=dim, unbiased=unbiased) / numel**0.5
 
-def nanstderr(x):
-    return nanstd(x) / x[~torch.isnan(x)].numel()**0.5
+def nanstderr(x, dim=None, unbiased=True):
+    raise NotImplementedError()
+    # return nanstd(x, dim=dim, unbiased=unbiased) / x[~torch.isnan(x)].numel()**0.5 # does not work with dim

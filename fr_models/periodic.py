@@ -59,6 +59,7 @@ def wrap(f, w_dims, order=3, period=2*torch.pi, mode='parallel'):
 def dist(x, y, w_dims, period=2*torch.pi):
     """
     Returns y-x+n*period, where n is an integer such that y-x+n*period is in [-period/2, period/2].
+    y-x must be at least 2D - the leading dimensions are batch dimensions
     --Removed: For dimensions in w_dims, x and y must satisfy -period/2 <= x, y <= period/2.
     """
     if len(w_dims) == 0:
@@ -72,6 +73,7 @@ def dist(x, y, w_dims, period=2*torch.pi):
     assert w_dims.shape == period.shape
     
     z = y - x
+    assert z.ndim > 1
     
     device = z.device
     w_dims.to(device)

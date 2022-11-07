@@ -23,6 +23,30 @@ class TensorStruct:
     def cpu(self, *args, **kwargs):
         for name, tensor in self.__tensors.items():
             setattr(self, name, tensor.cpu(*args, **kwargs))
+            
+class TensorList(list):
+    def to(self, *args, **kwargs):
+        for i, x in enumerate(self):
+            self[i] = x.to(*args, **kwargs)
+        return self
+    
+    def cpu(self, *args, **kwargs):
+        for i, x in enumerate(self):
+            self[i] = x.cpu(*args, **kwargs)
+        return self
+    
+    def numpy(self, *args, **kwargs):
+        for i, x in enumerate(self):
+            self[i] = x.numpy(*args, **kwargs)
+        return self
+    
+    def tolist(self, *args, **kwargs):
+        for i, x in enumerate(self):
+            self[i] = x.tolist(*args, **kwargs)
+        return self
+    
+    def __repr__(self):
+        return f'{self.__class__.__name__}({super().__repr__()})'
 
 class TensorDict(dict):
     def to(self, *args, **kwargs):
@@ -34,3 +58,16 @@ class TensorDict(dict):
         for k, v in self.items():
             self[k] = v.cpu(*args, **kwargs)
         return self
+    
+    def numpy(self, *args, **kwargs):
+        for k, v in self.items():
+            self[k] = v.numpy(*args, **kwargs)
+        return self
+    
+    def tolist(self, *args, **kwargs):
+        for k, v in self.items():
+            self[k] = v.tolist(*args, **kwargs)
+        return self
+    
+    def __repr__(self):
+        return f'{self.__class__.__name__}({super().__repr__()})'

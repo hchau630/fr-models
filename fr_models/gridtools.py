@@ -21,7 +21,7 @@ class Grid(torch.Tensor):
         self._w_dims = w_dims
         
     @classmethod
-    def from_x(cls, x, w_dims=None, device=None):
+    def from_x(cls, x, w_dims=None, check_valid=True, rtol=None, atol=None, device=None):
         if w_dims is None:
             w_dims = []
         
@@ -37,7 +37,15 @@ class Grid(torch.Tensor):
         extents = [tuple(extent) for extent in extents]
         grid = cls(extents, shape=x.shape[:-1], w_dims=w_dims, device=device)
         
-        torch.testing.assert_close(grid.tensor, x, rtol=1.0e-6, atol=2.0e-5)
+        if check_valid:
+            try:
+                torch.testing.assert_close(grid.tensor, x, rtol=rtol, atol=atol)
+            except AssertionError as err:
+                for i in range(grid.D):
+                    print(f"Dimension: {i}")
+                    print("original: ", slice_coord(x, i))
+                    print("new: ", slice_coord(grid.tensor, i))
+                raise err
         
         return grid
         

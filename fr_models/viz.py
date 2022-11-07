@@ -8,10 +8,16 @@ from fr_models import analytic_models as amd
 from fr_models import geom
 
 def scaterr(x, y, yerr, ax=None, **kwargs):
+    default_kwargs = {
+        'marker': '.',
+        'ls': 'none',
+    }
+    default_kwargs.update(kwargs)
+    
     if ax is None:
         ax = plt.gca()
     
-    return ax.errorbar(x.tolist(), y.tolist(), yerr=yerr.tolist(), marker='.', ls='none', **kwargs)
+    return ax.errorbar(x.tolist(), y.tolist(), yerr=yerr.tolist(), **default_kwargs)
 
 def field_1D(field, grid, dim, length_scales=None, half=True, shift=0, ax=None, label=None):
     assert field.shape == grid.grid_shape

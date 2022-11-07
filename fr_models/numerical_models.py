@@ -26,9 +26,9 @@ class NumericalModel(abc.ABC, torch.nn.Module):
         """
         Solves an ODE with input h and initial state r0 at time stamps t.
         Args:
-            h: a function that maps a 0-dimensional tensor t to a tensor with shape (N,),
-               or a tensor with shape (N,) that is interpreted as constant input
-            r0: a 1-dimensional tensor with shape (N,) or a 0-dimensional tensor, which is interpreted
+            h: a function that maps a 0-dimensional tensor t to a tensor with shape (*,N),
+               or a tensor with shape (*,N) that is interpreted as constant input
+            r0: a 1-dimensional tensor with shape (**,N) or a 0-dimensional tensor, which is interpreted
                to be constant across neurons
             t: If event_fn=None, t is a 1-dimensional tensor that specifies the time stamps
                at which the ODE is solved, and whose first element represents the initial time,
@@ -39,13 +39,14 @@ class NumericalModel(abc.ABC, torch.nn.Module):
             odenint_interface: either torchdiffeq.odeint or torchdiffeq.odeint_adjoint
                
         Returns:
+            (Let *** denote the shape obtained by broadcasting * and **)
             r: If event_fn is None: 
                    If t is a 1-dimensional tensor with length L, then
-                   r is a tensor with shape (L, N), with r[i] being the firing rates at t[i].
-                   If t is a 0-dimensional tensor, then r is tensor with shape (N,) 
+                   r is a tensor with shape (L,***,N), with r[i] being the firing rates at t[i].
+                   If t is a 0-dimensional tensor, then r is tensor with shape (***,N) 
                    that represents the firing rates at t.
                else:
-                   r is tensor with shape (N,) that represents the firing rates at event_t
+                   r is tensor with shape (***,N) that represents the firing rates at event_t
             t: If event_fn is None:
                    t is the same as the input t
                else:
@@ -55,40 +56,45 @@ class NumericalModel(abc.ABC, torch.nn.Module):
         if 'options' not in kwargs or ('max_num_steps' not in kwargs['options'] and 'method' in ADAPTIVE_SOLVERS):
             kwargs['options'] = {'max_num_steps': 100} # by default, set max_num_steps to 100 if it is not provided and method is not a fixed solver.
             
-        if not callable(h):
-            _h = lambda t: h
-        else:
-            _h = h
-            
         if event_fn is None:
             if t.ndim == 0: # if t is a scalar tensor
                 _t = torch.Tensor([0,t]).to(t.device)
-            else:
+            elif t.ndim == 1:
                 _t = t
+            else:
+                raise ValueError("t must be a one or zero dimensional tensor")
+            t0 = _t[0]
         else:
             assert t.ndim == 0
             t0 = t
             
-        if r0.ndim == 0: # if r is a scalar tensor
-            _r0 = r0.expand((self.N,))
+        if not callable(h):
+            h0 = h
+            h = lambda t, h=h: h
         else:
-            _r0 = r0
+            h0 = h(t0)
+            h = h
+            
+        assert h0.shape[-1] == self.N # asserts h has correct shape (*,N)
+            
+        r0, _ = torch.broadcast_tensors(r0, h0) # (***,N)
 
-        drdt = partial(self._drdt, h=_h)
+        drdt = partial(self._drdt, h=h)
         
         try:
             if event_fn is None:
-                r = odeint_interface(drdt, _r0, _t, **kwargs)
+                r = odeint_interface(drdt, r0, _t, **kwargs) # (L,***,N)
 
                 if t.ndim == 0:
-                    return r[-1], t
-                return r, t
+                    return r[-1], t # r - (***,N)
+                
+                return r, t # r - (L,***,N)
 
             else:
-                _event_fn = partial(event_fn, h=_h)
-                event_t, r = odeint_event(drdt, _r0, t0, event_fn=_event_fn, odeint_interface=odeint_interface, **kwargs)
+                event_fn = partial(event_fn, h=h)
+                event_t, r = odeint_event(drdt, r0, t0, event_fn=event_fn, odeint_interface=odeint_interface, **kwargs) # r - (L,***,N)
 
-                return r[-1], event_t
+                return r[-1], event_t # r - (***,N)
         except AssertionError as err:
             # Sometimes odeint raises an error AssertionError('underflow in dt ...') or AssertionError('max_num_steps exceeded ...')
             # This catches that error and re-raises the error with a more detailed 
@@ -180,20 +186,36 @@ class MultiDimModel(NumericalModel):
         return self.W.reshape(*self.shape,*self.shape)
         
     def forward(self, h, r0, t, **kwargs):
-        if r0.ndim != 0:
-            r0 = r0.reshape(-1)
+        # h - (*,*shape) or Callable[float,(*,*shape)], r0 - (**,*shape) or (,)
+                
+        if t.ndim == 0:
+            t0 = torch.tensor(0, device=t.device)
+        else:
+            t0 = t[0]
         
         if not callable(h):
-            _h = h.reshape(-1)
+            h0 = h # (*,*shape)
         else:
-            _h = lambda t: h(t).reshape(-1)
+            h0 = h(t0) # (*,*shape)
 
-        r, t = super().forward(_h, r0, t, **kwargs) # (L, N) or (N)
+        assert h0.shape[-self.ndim:] == self.shape # asserts h has correct shape
+        h_batch_shape = h0.shape[:-self.ndim]
+        
+        if not callable(h):
+            h = h.reshape(*h_batch_shape,self.N) # (*,N)
+        else:
+            h = lambda t, h=h, h_batch_shape=h_batch_shape: h(t).reshape(*h_batch_shape,self.N) # (*,N)
+            
+        r0, _ = torch.broadcast_tensors(r0, h0) # (***,*shape)
+        batch_shape = r0.shape[:-self.ndim]
+        r0 = r0.reshape(*batch_shape,self.N) # (***,N)
+
+        r, t = super().forward(h, r0, t, **kwargs) # (L,***,N) or (***,N)
 
         if t.ndim == 0:
-            r = r.reshape(*self.shape)
+            r = r.reshape(*batch_shape,*self.shape) # (***,*shape)
         else:
-            r = r.reshape(len(t), *self.shape)
+            r = r.reshape(len(t),*batch_shape,*self.shape) # (***,*shape)
             
         return r, t
     
@@ -228,35 +250,6 @@ class TrivialVBModel(MultiDimModel):
         self.B_N = np.prod(self.B_shape)
         self.w_dims = w_dims
         assert all([w_dim < self.B_dim for w_dim in self.w_dims])
-        
-    def get_h(self, amplitude, F_idx, B_idx=None):
-        """
-        Returns an input vector h where the neurons with F index F_idx and B index B_idx
-        is are given input with input strength amplitude.
-        Args:
-          - amplitude: scalar input strength
-          - F_idx: Either a scalar integer, 1-dimensional array-like, or 
-                   2-dimensional array-like object. Array-like means either tensor, 
-                   tuple, or list. If 2-dimensional, then F_idx.shape[0] is the number 
-                   of neurons with non-zero input. If a scalar, then F must be
-                   1-dimensional.
-          - B_idx: Similar to F_idx, but if None, then B_idx will be the index of the
-                   neuron at the origin of the B space.
-        """
-        device = amplitude.device
-        
-        if B_idx is None:
-            B_idx = gridtools.get_mids(self.B_shape, w_dims=self.w_dims)
-            
-        F_idx = torch.as_tensor(F_idx, device=device)
-        F_idx = torch.atleast_2d(F_idx)
-        B_idx = torch.as_tensor(B_idx, device=device)
-        B_idx = torch.atleast_2d(B_idx)
-            
-        h = torch.zeros(self.shape, device=device)        
-        h[(*F_idx.T,*B_idx.T)] = amplitude
-        
-        return h
     
 class MultiCellModel(TrivialVBModel):
     def __init__(self, W, w_dims, **kwargs):
@@ -272,7 +265,8 @@ class FRModel(NumericalModel):
         self.f = f
         
     def _drdt(self, t, r, h):
-        result = self.f(self.W @ r + h(t)) - r
+        # W - (N,N), r - (***,N), h - (*,N)
+        result = self.f(torch.einsum('ij,...j->...i', self.W, r) + h(t)) - r
         return result
     
 class MultiCellFRModel(MultiCellModel, FRModel):
@@ -307,24 +301,25 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     def __init__(self, W, r_star, w_dims, **kwargs):
         assert torch.all(r_star >= 0)
         super().__init__(W, w_dims=w_dims, **kwargs) # f is defined dynamically
-        self._r_star = r_star
+        assert r_star.shape == self.F_shape
+        self._r_star = r_star # (*self.F_shape), i.e. (n)
         
     @property
     def _f_prime(self):
-        return 2*self._r_star**0.5
+        return 2*self._r_star**0.5 # (*self.F_shape)
     
     @property
     def r_star(self):
         device = self._r_star.device
-        return torch.einsum('i,...->i...', self._r_star, torch.ones(self.B_shape, device=device))
+        return torch.einsum('i,...->i...', self._r_star, torch.ones(self.B_shape, device=device)) # (*self.shape)
         
     @property
     def f_prime(self):
-        return 2*self.r_star**0.5
+        return 2*self.r_star**0.5 # (*self.shape)
     
     def spectral_radius(self, use_circulant=False):
         if use_circulant:
-            FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*shape,n,*shape)
+            FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*self.B_shape,n,*self.B_shape)
             return _torch.linalg.eigvalsbnc(FW, self.B_dim).abs().max()
         else:
             F = torch.diag(self.f_prime.reshape(-1))
@@ -332,7 +327,7 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
 
     def instability(self, use_circulant=False):
         if use_circulant:
-            FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*shape,n,*shape)
+            FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*self.B_shape,n,*self.B_shape)
             return _torch.linalg.eigvalsbnc(FW, self.B_dim).real.max()
         else:
             F = torch.diag(self.f_prime.reshape(-1))
@@ -341,18 +336,18 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     def response_matrix(self, use_circulant=False):
         # F = torch.diag(self.f_prime.reshape(-1))
         # if use_circulant:
-        #     FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*shape,n,*shape)
+        #     FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*self.B_shape,n,*self.B_shape)
         # else:
         #     FW = torch.diag(self.f_prime.reshape(-1)) @ self.W
         # test_inputs = torch.eye(X
-        F = torch.diag(self.f_prime.reshape(-1))
-        FW = F @ self.W
-        I = torch.eye(FW.shape[0], device=FW.device)
-        R = torch.linalg.inv(I - FW) @ F
-        return R
+        F = torch.diag(self.f_prime.reshape(-1)) # (self.N,self.N)
+        FW = F @ self.W # (self.N,self.N)
+        I = torch.eye(FW.shape[0], device=FW.device) # (self.N,self.N)
+        R = torch.linalg.inv(I - FW) @ F # (self.N,self.N)
+        return R # (self.N,self.N)
     
     def _drdt(self, t, r, h):
-        result = self.f_prime.reshape(-1) * (self.W @ r + h(t)) - r
+        result = self.f_prime.reshape(-1) * (torch.einsum('ij,...j->...i', self.W, r) + h(t)) - r # (*,self.N)
         return result
     
     def forward(self, delta_h, delta_r0, t, **kwargs):
@@ -361,7 +356,11 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     
     def steady_state(self, delta_h, delta_r0=None, max_t=None, method='dynamic', **kwargs):
         if method == 'theory':
-            return (self.response_matrix() @ delta_h.reshape(-1)).reshape(self.shape), np.inf
+            assert not callable(delta_h) and delta_r0 is None
+            assert delta_h.shape[-self.ndim:] == self.shape
+            input_shape = delta_h.shape # (*,*shape)
+            delta_r = torch.einsum('ij,...j->...i',self.response_matrix(), delta_h.reshape(-1,self.N)) # (prod(*),N)
+            return delta_r.reshape(input_shape), np.inf
         else:
             return super().steady_state(delta_h, delta_r0, max_t, method=method, **kwargs)
         
@@ -369,27 +368,28 @@ class PerturbedMultiCellSSNModel(MultiCellSSNModel):
     def __init__(self, W, r_star, w_dims, power, **kwargs):
         assert torch.all(r_star >= 0)
         super().__init__(W, w_dims=w_dims, power=power, **kwargs)
-        self._r_star = r_star
+        assert r_star.shape == self.F_shape
+        self._r_star = r_star  # (*self.F_shape), i.e. (n)
         
     @property
     def r_star(self):
         device = self._r_star.device
-        return torch.einsum('i,...->i...', self._r_star, torch.ones(self.B_shape, device=device))
+        return torch.einsum('i,...->i...', self._r_star, torch.ones(self.B_shape, device=device)) # (*self.shape)
         
     @property
     def h_star(self):
         r_star = self.r_star.reshape(-1)
-        return (r_star**0.5 - self.W @ r_star).reshape(self.shape)
+        return (r_star**0.5 - self.W @ r_star).reshape(self.shape) # (*self.shape)
     
     def forward(self, delta_h, delta_r0, t, **kwargs):
         if not callable(delta_h):
-            h = self.h_star + delta_h
+            h = self.h_star + delta_h # (*,*self.shape)
         else:
-            h = lambda t: self.h_star + delta_h(t)
+            h = lambda t: self.h_star + delta_h(t) # (*,*self.shape)
             
-        r0 = self.r_star + delta_r0
+        r0 = self.r_star + delta_r0 # (**,*self.shape)
             
-        r, t = super().forward(h, r0, t, **kwargs)
+        r, t = super().forward(h, r0, t, **kwargs) # (***,*self.shape)
         
         delta_r = r - self.r_star
         
