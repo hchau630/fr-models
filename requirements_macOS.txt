@@ -1,8 +1,4 @@
-numpy
-matplotlib
-scipy
-torch
-# torchdiffeq
-# git+https://www.github.com/sbarratt/torch_interpolations
-hyc-utils
+# development requirements
 twine
+
+-e .[test]
