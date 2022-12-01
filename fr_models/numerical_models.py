@@ -317,6 +317,11 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     def f_prime(self):
         return 2*self.r_star**0.5 # (*self.shape)
     
+    @property
+    def h_star(self):
+        r_star = self.r_star.reshape(-1)
+        return (r_star**0.5 - self.W @ r_star).reshape(self.shape) # (*self.shape)
+    
     def spectral_radius(self, use_circulant=False):
         if use_circulant:
             FW = torch.einsum('i,i...->i...',self._f_prime, self.W_expanded) # (n,*self.B_shape,n,*self.B_shape)
@@ -372,9 +377,17 @@ class PerturbedMultiCellSSNModel(MultiCellSSNModel):
         self._r_star = r_star  # (*self.F_shape), i.e. (n)
         
     @property
+    def _f_prime(self):
+        return 2*self._r_star**0.5 # (*self.F_shape)
+        
+    @property
     def r_star(self):
         device = self._r_star.device
         return torch.einsum('i,...->i...', self._r_star, torch.ones(self.B_shape, device=device)) # (*self.shape)
+    
+    @property
+    def f_prime(self):
+        return 2*self.r_star**0.5 # (*self.shape)
         
     @property
     def h_star(self):
