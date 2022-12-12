@@ -19,7 +19,7 @@ def scaterr(x, y, yerr, ax=None, **kwargs):
     
     return ax.errorbar(x.tolist(), y.tolist(), yerr=yerr.tolist(), **default_kwargs)
 
-def field_1D(field, grid, dim, length_scales=None, half=True, shift=0, ax=None, label=None):
+def field_1D(field, grid, dim, length_scales=None, half=True, shift=0, ax=None, **kwargs):
     assert field.shape == grid.grid_shape
     
     if ax is None:
@@ -37,7 +37,7 @@ def field_1D(field, grid, dim, length_scales=None, half=True, shift=0, ax=None, 
     else:
         x = grid.tensor[indices][...,dim]
     
-    line, = ax.plot(x.tolist(), field[indices].tolist(), label=label)
+    line, = ax.plot(x.tolist(), field[indices].tolist(), **kwargs)
     
     return line
 
