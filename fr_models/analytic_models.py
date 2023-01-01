@@ -47,6 +47,10 @@ class SSNModel(AnalyticModel):
         return self.get_f_prime(r_star, self.power)
     
 class KernelBasedSSNModel(SSNModel):
+    def __init__(self, *args, grid_diagonal=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.grid_diagonal = grid_diagonal
+    
     @property
     @abc.abstractmethod
     def kernel(self):
@@ -54,11 +58,16 @@ class KernelBasedSSNModel(SSNModel):
     
     def numerical_model(self, grid, **kwargs):
         W_discrete = self.kernel.discretize(grid) # (*shape, *shape, n, n)
+        if not self.grid_diagonal:
+            N = np.prod(grid.grid_shape)
+            W_discrete = W_discrete.reshape(N, N, self.n, self.n)
+            W_discrete[range(N), range(N)] = 0.0
+            W_discrete = W_discrete.reshape(*grid.grid_shape, *grid.grid_shape, self.n, self.n)
         W_discrete = W_discrete.moveaxis(-2, 0).moveaxis(-1, 1+self.ndim) # (n, *shape, n, *shape)
         return nmd.MultiCellSSNModel(W_discrete, w_dims=self.w_dims, power=self.power, **kwargs)
     
 class KernelSSNModel(KernelBasedSSNModel):
-    def __init__(self, kernel, power=2):
+    def __init__(self, kernel, power=2, grid_diagonal=True):
         assert kernel.F_ndim == 2 # assume kernel is a function from R^D to R^{nxn}, where n is number of cell types
         n = kernel.F_shape[0]
         ndim = kernel.D
@@ -70,7 +79,7 @@ class KernelSSNModel(KernelBasedSSNModel):
             period = kernel.period
         else:
             period = 2*torch.pi
-        super().__init__(n, ndim, power=power, w_dims=w_dims, period=period)
+        super().__init__(n, ndim, power=power, w_dims=w_dims, period=period, grid_diagonal=grid_diagonal)
         self._kernel = kernel
     
     @property
@@ -86,14 +95,14 @@ class GaussianSSNModel(KernelBasedSSNModel):
             return W*torch.exp(-0.5*torch.einsum('ijk,...k->...ij',sigma**2,k**2))
         return W_f
 
-    def __init__(self, W, sigma, power=2, w_dims=None, wn_order=9, period=2*torch.pi):
+    def __init__(self, W, sigma, power=2, w_dims=None, wn_order=9, period=2*torch.pi, grid_diagonal=True):
         assert W.ndim == 2 and W.shape[0] == W.shape[1]
         assert sigma.ndim == W.ndim + 1 and sigma.shape[:2] == W.shape
         
         n = W.shape[0]
         ndim = sigma.shape[-1]
         
-        super().__init__(n, ndim, power=power, w_dims=w_dims, period=period)
+        super().__init__(n, ndim, power=power, w_dims=w_dims, period=period, grid_diagonal=grid_diagonal)
         
         self.W = W
         self.sigma = sigma
