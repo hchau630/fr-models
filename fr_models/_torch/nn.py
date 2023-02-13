@@ -3,7 +3,7 @@ from fr_models import optimize as optim
 def state_dict(model):
     state_dict = model.state_dict()
     for name, param in model.named_parameters():
-        if isinstance(param, optim.Parameter) and param.custom_name is not None:
+        if isinstance(param, optim.Parameter) and param.custom_name is not None and name != param.custom_name:
             state_dict[param.custom_name] = state_dict[name]
             del state_dict[name]
             
