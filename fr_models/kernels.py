@@ -250,6 +250,27 @@ class ProductKernel(Kernel):
     
     def forward(self, x, y=0):
         return self.K1(x, y) * self.K2(x, y)
+    
+class DivisionKernel(Kernel):
+    def __init__(self, K1, K2):
+        assert K1.F_shape == K2.F_shape
+        assert K1.D == K2.D
+        
+        super().__init__()
+        
+        self.K1 = K1
+        self.K2 = K2
+        
+    @property
+    def F_shape(self):
+        return self.K1.F_shape
+    
+    @property
+    def D(self):
+        return self.K1.D
+    
+    def forward(self, x, y=0):
+        return self.K1(x, y) / self.K2(x, y)
        
 class SumKernel(Kernel):
     def __init__(self, K1, K2):
