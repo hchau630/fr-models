@@ -29,9 +29,25 @@ def get_xy(acts, plot_dim, Ls, w_dims=[], marg_dims=[], half=True, offset=1, x_s
         
     return x[start:]*x_scale, y[start:]
 
+def get_h(n_model, amplitude, F_idx, B_idx=None):
+    device = amplitude.device
+        
+    if B_idx is None:
+        B_idx = gridtools.get_mids(n_model.B_shape, w_dims=n_model.w_dims)
+
+    F_idx = torch.as_tensor(F_idx, device=device)
+    F_idx = torch.atleast_2d(F_idx)
+    B_idx = torch.as_tensor(B_idx, device=device)
+    B_idx = torch.atleast_2d(B_idx)
+
+    h = torch.zeros(n_model.shape, device=device)        
+    h[(*F_idx.T,*B_idx.T)] = amplitude
+
+    return h
+
 @pytest.mark.parametrize('method', ['dynamic', 'static'])
 @pytest.mark.parametrize('r_model_trained, trained_responses', [
-    ({'idx': 0}, {'idx': 0}) if i != 7 else pytest.param({'idx': 7}, {'idx': 7}, marks=pytest.mark.xfail(reason='inaccurate ground truth')) for i in range(10)], indirect=True)
+    ({'idx': i}, {'idx': i}) if i not in [2,4] else pytest.param({'idx': i}, {'idx': i}, marks=pytest.mark.xfail(reason='inaccurate ground truth')) for i in range(10)], indirect=True)
 def test_response(method, r_model_trained, trained_responses, device, benchmark):
     plot_dim = 0
     i, j = 0, 0
@@ -45,11 +61,11 @@ def test_response(method, r_model_trained, trained_responses, device, benchmark)
     
     n_model = a_model.numerical_model(grid).nonlinear_perturbed_model(r_star)
 
-    delta_h = n_model.get_h(amplitude, j)
+    delta_h = get_h(n_model, amplitude, j)
     delta_r0 = torch.tensor(0.0, device=delta_h.device)
     max_t = torch.tensor(500.0, device=delta_h.device)
     
-    delta_r, t = n_model.steady_state(delta_h, delta_r0, max_t, method=method, dr_rtol=1.0e-3, dr_atol=1.0e-5, solver_kwargs=None)
+    delta_r, t = n_model.steady_state(delta_h, delta_r0, max_t, method=method, dr_rtol=1.0e-5, dr_atol=1.0e-5, solver_kwargs=None)
     # delta_r, t = benchmark(n_model.steady_state, delta_h, delta_r0, max_t, method=method)
     delta_r = delta_r.cpu().numpy()
 

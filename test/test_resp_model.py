@@ -63,7 +63,7 @@ class TestLinearizedSteadyStateResponse:
         
     @pytest.mark.parametrize('r_model_trained',
                              [
-                                 {'idx': i} for i in range(10) if i != 7
+                                 {'idx': i} for i in range(10) if i != 2
                              ],
                              indirect=True)
     def test_trained(self, r_model_trained, device, response_data):

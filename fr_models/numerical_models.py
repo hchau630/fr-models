@@ -1,5 +1,6 @@
 import abc
 from functools import partial
+import warnings
 
 from torchdiffeq import odeint, odeint_event
 import numpy as np
@@ -361,8 +362,10 @@ class LinearizedMultiCellSSNModel(MultiCellModel):
     
     def steady_state(self, delta_h, delta_r0=None, max_t=None, method='dynamic', **kwargs):
         if method == 'theory':
-            assert not callable(delta_h) and delta_r0 is None
+            assert not callable(delta_h)
             assert delta_h.shape[-self.ndim:] == self.shape
+            if delta_r0 is not None:
+                warnings.warn("delta_r0 is provided, but theoretical steady_state does not depend on delta_r0 so it will be ignored.")
             input_shape = delta_h.shape # (*,*shape)
             delta_r = torch.einsum('ij,...j->...i',self.response_matrix(), delta_h.reshape(-1,self.N)) # (prod(*),N)
             return delta_r.reshape(input_shape), np.inf

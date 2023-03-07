@@ -8,6 +8,22 @@ from . import gridtools
 
 logger = logging.getLogger(__name__)
 
+def get_h(n_model, amplitude, F_idx, B_idx=None):
+    device = amplitude.device
+        
+    if B_idx is None:
+        B_idx = gridtools.get_mids(n_model.B_shape, w_dims=n_model.w_dims)
+
+    F_idx = torch.as_tensor(F_idx, device=device)
+    F_idx = torch.atleast_2d(F_idx)
+    B_idx = torch.as_tensor(B_idx, device=device)
+    B_idx = torch.atleast_2d(B_idx)
+
+    h = torch.zeros(n_model.shape, device=device)        
+    h[(*F_idx.T,*B_idx.T)] = amplitude
+
+    return h
+
 class NModelSteadyStateResponse(torch.nn.Module):
     def __init__(self, n_model, grid, r_star, amplitude, i, j, length_scales, max_t=500.0, avg_dims=None, method='dynamic', steady_state_kwargs=None, n_model_kwargs=None, check_interpolation_range=True):
         super().__init__()
@@ -94,7 +110,7 @@ class NModelSteadyStateResponse(torch.nn.Module):
         """      
         nlp_model = self.n_model.nonlinear_perturbed_model(self.r_star, **self.n_model_kwargs)
         
-        delta_h = self.n_model.get_h(self.amplitude, self.j, B_idx=stim_loc)
+        delta_h = get_h(self.n_model, self.amplitude, self.j, B_idx=stim_loc)
         torch.testing.assert_close(delta_h, self.get_delta_h(stim_loc=stim_loc))
         delta_r0 = torch.tensor(0.0, device=delta_h.device)
         
@@ -210,7 +226,7 @@ class SteadyStateResponse(torch.nn.Module):
         else:
             p_model = n_model.nonlinear_perturbed_model(self.r_star, **self.n_model_kwargs)
         
-        delta_h = n_model.get_h(self.amplitude, self.j, B_idx=stim_loc)
+        delta_h = get_h(n_model, self.amplitude, self.j, B_idx=stim_loc)
         torch.testing.assert_close(delta_h, self.get_delta_h(stim_loc=stim_loc))
         delta_r0 = torch.tensor(0.0, device=delta_h.device)
         

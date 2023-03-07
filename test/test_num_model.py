@@ -7,10 +7,10 @@ from fr_models import analytic_models as amd
 from fr_models import gridtools
 
 class TestMultiCellSSNModel:
-    def test_W(self):
-        data_path = '/home/hc3190/ken/fr-models/test/data'
+    def test_W(self, request, data_path):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        for model_name in ['model_1', 'model_2']:
+        # for model_name in ['model_1', 'model_2']: # model_2 files are too large for github
+        for model_name in ['model_1']:
             model_config = utils.io.load_data(f'{data_path}/{model_name}/a_model_config.pkl')
             model_W = torch.tensor(utils.io.load_data(f'{data_path}/{model_name}/n_model_W.pkl'), dtype=torch.float)
             

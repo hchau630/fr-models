@@ -107,6 +107,13 @@ class Grid(torch.Tensor):
     def float(self, *args, **kwargs):
         new_tensor = self.tensor.float(*args, **kwargs)
         return self.__class__(data=new_tensor, extents=self.extents, shape=self.grid_shape, w_dims=self.w_dims)
+    
+    def __deepcopy__(self, memo):
+        """
+        LIKELY NOT A CORRECT IMPLEMENTATION.
+        This is just to bypass the error thrown by torch.Tensor when calling deepcopy on grid (which happens when deepcopying model).
+        """
+        return self.clone()
 #     @staticmethod
 #     def meshgrid(grids):
 #         tensors = [grid.points for grid in grids]

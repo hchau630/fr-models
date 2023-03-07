@@ -10,7 +10,9 @@ from fr_models import response_models as rmd
 from fr_models import gridtools
 import utils
 
-DATA_PATH = '/home/hc3190/ken/fr-models/test/data'
+@pytest.fixture
+def data_path(request):
+    return f'{request.config.rootdir}/test/data'
 
 def pytest_sessionstart(session):
     """
@@ -60,7 +62,7 @@ def device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 @pytest.fixture
-def r_model_untrained(request):
+def r_model_untrained(request, data_path):
     ndim_s = request.param['ndim_s']
     periodic = request.param['periodic']
     
@@ -88,7 +90,7 @@ def r_model_untrained(request):
     )
     
     # r_star
-    _, y_data_base, _ = load_exp_data(f'{DATA_PATH}/experiment/baselines/base_by_dist.txt')
+    _, y_data_base, _ = load_exp_data(f'{data_path}/experiment/baselines/base_by_dist.txt')
     r_star = torch.tensor([1.0, 1.2], dtype=torch.float) * torch.tensor(np.mean(y_data_base), dtype=torch.float)
     r_star = torch.nn.Parameter(r_star, requires_grad=False)
     
@@ -131,17 +133,17 @@ def r_model_untrained(request):
     return r_model
 
 @pytest.fixture
-def r_model_trained(request):
+def r_model_trained(request, data_path):
     idx = request.param['idx']
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    responses_path = pathlib.Path(f'{DATA_PATH}/responses')
-    filename = list(responses_path.glob('*.pkl'))[idx]
+    responses_path = pathlib.Path(f'{data_path}/responses')
+    filename = list(sorted(responses_path.glob('*.pkl')))[idx]
 
     data = utils.io.load_data(filename)
 
-    model_data, exp_data = get_data(data['path'])
+    model_data, exp_data = get_data(f"{data_path}/{data['path']}")
     W_pop, sigma_pop, amplitude, r_star, Ls, shape, w_dims = model_data
     x_data, y_data, new_y_data, x_scale = exp_data
     
@@ -165,19 +167,19 @@ def r_model_trained(request):
     return r_model
 
 @pytest.fixture
-def trained_responses(request):
+def trained_responses(request, data_path):
     idx = request.param['idx']
     
-    responses_path = pathlib.Path(f'{DATA_PATH}/responses')
-    filename = list(responses_path.glob('*.pkl'))[idx]
+    responses_path = pathlib.Path(f'{data_path}/responses')
+    filename = list(sorted(responses_path.glob('*.pkl')))[idx]
 
     data = utils.io.load_data(filename)
     
     return data['data']
 
 @pytest.fixture
-def response_data():
-    data_path = f'{DATA_PATH}/experiment/space_resp/resp_geq500_min.txt'
+def response_data(data_path):
+    data_path = f'{data_path}/experiment/space_resp/resp_geq500_min.txt'
     
     x_data, y_data_mean, y_data_sem = load_exp_data(data_path)
     

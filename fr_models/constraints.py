@@ -19,6 +19,10 @@ class Constraint(abc.ABC, torch.nn.Module):
     @abc.abstractmethod
     def forward(self, r_model):
         pass
+    
+    def __repr__(self):
+        properties = [f'{k}={v}' for k, v in self.__dict__.items() if not k.startswith('_') and k not in ['training']]
+        return f'{type(self).__name__}({", ".join(properties)})'
 
 # TODO: Modify the forward function to use numerical model's spectral radius
 # class SpectralRadiusCon(Constraint):
