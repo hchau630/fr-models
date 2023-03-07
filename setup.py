@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='fr_models',
-    version='0.1.4',
+    version='0.1.7',
     packages=find_packages(),
     install_requires=[
         'numpy',
