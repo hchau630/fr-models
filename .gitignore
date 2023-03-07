@@ -5,6 +5,7 @@ data/
 /test/data/*
 !/test/data/model_1/
 # !/test/data/model_2/ files too large
+!/test/data/responses/
 !/test/data/experiment/
 
 # Byte-compiled / optimized / DLL files
