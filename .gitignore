@@ -1,7 +1,10 @@
 # Custom files/directories
 data/
-!test/data/model_1/
-!test/data/experiment/
+!/test/
+!/test/data/
+/test/data/*
+!/test/data/model_1/
+!/test/data/experiment/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
