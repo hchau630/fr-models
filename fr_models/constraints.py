@@ -41,7 +41,7 @@ class Constraint(abc.ABC, torch.nn.Module):
 class StabilityCon(Constraint):
     def __init__(self, max_instability=0.99, **kwargs):
         super().__init__()
-        self.max_instability = 0.99
+        self.max_instability = max_instability
         self.kwargs = kwargs
         
     @property
