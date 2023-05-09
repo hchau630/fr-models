@@ -9,7 +9,7 @@ import scipy.optimize as sp_opt
 from . import exceptions
 from . import constraints as con
 from . import timeout
-import utils
+import hyclib as lib
 
 logger = logging.getLogger(__name__)
 
@@ -328,14 +328,14 @@ class Optimizer():
             for constraint_name, constraint_cache in zip(self.constraint_names, self.constraint_caches):
                 logger.debug(f"{constraint_name} cache info: {constraint_cache.cache_info()}")
             logger.debug(self.params.detach().cpu())
-            # logger.debug(utils.pprint.pformat(self.state_dict()))
+            # logger.debug(lib.pprint.pformat(self.state_dict()))
             
         return callback
         
     def __call__(self, x, y):
         logger.info("Started optimizing...")
         # logger.debug(self.params.detach().cpu())
-        logger.debug(utils.pprint.pformat(self.state_dict()))
+        logger.debug(lib.pprint.pformat(self.state_dict()))
         
         hist = {'loss': [], 'satisfied': [], 'params': []}
         start_time = time.time()
@@ -391,7 +391,7 @@ class Optimizer():
             
             logger.info(f"Returning result during optimization. Loss: {loss}.")
             logger.debug(self.params.detach().cpu())
-            # logger.debug(utils.pprint.pformat(self.state_dict()))
+            # logger.debug(lib.pprint.pformat(self.state_dict()))
             return True, loss
         
         self.params = result.x
@@ -399,5 +399,5 @@ class Optimizer():
         
         logger.info(f"Finished optimization successfully. Loss: {loss}")
         logger.debug(self.params.detach().cpu())
-        # logger.debug(utils.pprint.pformat(self.state_dict()))
+        # logger.debug(lib.pprint.pformat(self.state_dict()))
         return True, loss

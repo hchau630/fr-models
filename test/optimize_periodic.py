@@ -11,7 +11,7 @@ from fr_models import response_models as rmd
 from fr_models import optimize as optim
 from fr_models import gridtools, criteria, regularizers
 from fr_models import constraints as con
-import utils
+import hyclib as lib
 
 ENV = {
     "models_path": "/home/hc3190/ken/V1-perturb/data/models",
@@ -188,7 +188,7 @@ def main():
 
 #         torch.save(model.state_dict(), f'{path}/state_dict.pt')
 #         torch.save(dataset.tensors, f'{path}/dataset.pt')
-#         utils.io.save_config(f'{path}/meta.json', {'loss': loss})
+#         lib.io.save_config(f'{path}/meta.json', {'loss': loss})
 
 #         logger.info(f"Saving. Model name: {model_name}, loss: {loss}")
     

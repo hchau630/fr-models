@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 from fr_models import _torch
-import utils
+import hyclib as lib
 
 def old_binned_statistic_n(y, values=None, mask=None, nanstats=True, statistics=None, device=None, **bucketize_kwargs):
     """
@@ -149,7 +149,7 @@ def test_binned_statistic():
     for i in range(len(values)):
         grid, stats_1 = old_binned_statistic_n(y, values[i], shape=shape, ymin=ymin, ymax=ymax, mask=mask)
 
-        for k, v0, v1 in utils.itertools.dict_zip(stats_0, stats_1):
+        for k, v0, v1 in lib.itertools.dict_zip(stats_0, stats_1):
             try:
                 torch.testing.assert_close(v0[i], v1, equal_nan=True)
             except AssertionError as err:
@@ -173,7 +173,7 @@ def test_binned_statistic():
     for i in range(len(values)):
         grid, stats_1 = old_binned_statistic_n(y, values[i], shape=shape, ymin=ymin, ymax=ymax, mask=mask, nanstats=False)
 
-        for k, v0, v1 in utils.itertools.dict_zip(stats_0, stats_1):
+        for k, v0, v1 in lib.itertools.dict_zip(stats_0, stats_1):
             try:
                 torch.testing.assert_close(v0[i], v1, equal_nan=True)
             except AssertionError as err:
@@ -193,7 +193,7 @@ def test_binned_statistic():
     grid, stats_0 = _torch.stats.binned_statistic_n(y, shape=shape, ymin=ymin, ymax=ymax, mask=mask)
     grid, stats_1 = old_binned_statistic_n(y, shape=shape, ymin=ymin, ymax=ymax, mask=mask)
 
-    for k, v0, v1 in utils.itertools.dict_zip(stats_0, stats_1):
+    for k, v0, v1 in lib.itertools.dict_zip(stats_0, stats_1):
         try:
             torch.testing.assert_close(v0, v1, equal_nan=True)
         except AssertionError as err:
@@ -213,7 +213,7 @@ def test_binned_statistic():
     grid, stats_0 = _torch.stats.binned_statistic_n(y, shape=shape, ymin=ymin, ymax=ymax, mask=mask)
     grid, stats_1 = old_binned_statistic_n(y, shape=shape, ymin=ymin, ymax=ymax, mask=mask)
 
-    for k, v0, v1 in utils.itertools.dict_zip(stats_0, stats_1):
+    for k, v0, v1 in lib.itertools.dict_zip(stats_0, stats_1):
         try:
             torch.testing.assert_close(v0, v1, equal_nan=True)
         except AssertionError as err:

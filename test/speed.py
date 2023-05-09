@@ -7,10 +7,10 @@ import torch
 
 from fr_models import analytic_models as amd
 from fr_models import numerical_models as nmd
-import utils
+import hyclib as lib
 
 def get_data(path):
-    data = utils.io.load_data(path)
+    data = lib.io.load_data(path)
     
     popt = data['popt']
     fit_options = data['meta']['fit_options']
@@ -34,7 +34,7 @@ def get_data(path):
 def setup():
     data_path = pathlib.Path('/home/hc3190/ken/V1-perturb/test/data/responses')
     filename = list(data_path.glob('*.pkl'))[0]
-    data = utils.io.load_data(filename)
+    data = lib.io.load_data(filename)
         
     model_data, exp_data = get_data(data['path'])
     W_pop, sigma_pop, amplitude, r_star, Ls, shape, w_dims = model_data

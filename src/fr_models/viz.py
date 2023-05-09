@@ -3,7 +3,6 @@ import matplotlib.colors as colors
 import numpy as np
 import torch
 
-import utils
 from fr_models import analytic_models as amd
 from fr_models import geom
 

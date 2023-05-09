@@ -4,7 +4,7 @@ import logging
 
 import torch
 
-import utils
+import hyclib as lib
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ def cache(fun):
         state_dict = self.state_dict()
         if cached_state_dict is not None:
             equal = True
-            for _, v1, v2 in utils.itertools.dict_zip(cached_state_dict, state_dict):
+            for _, v1, v2 in lib.itertools.dict_zip(cached_state_dict, state_dict):
                 equal = equal and (v1 == v2).all()
 
             if equal:

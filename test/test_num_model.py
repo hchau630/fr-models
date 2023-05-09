@@ -2,7 +2,7 @@ import pytest
 
 import torch
 
-import utils
+import hyclib as lib
 from fr_models import analytic_models as amd
 from fr_models import gridtools
 
@@ -11,8 +11,8 @@ class TestMultiCellSSNModel:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # for model_name in ['model_1', 'model_2']: # model_2 files are too large for github
         for model_name in ['model_1']:
-            model_config = utils.io.load_data(f'{data_path}/{model_name}/a_model_config.pkl')
-            model_W = torch.tensor(utils.io.load_data(f'{data_path}/{model_name}/n_model_W.pkl'), dtype=torch.float)
+            model_config = lib.io.load_data(f'{data_path}/{model_name}/a_model_config.pkl')
+            model_W = torch.tensor(lib.io.load_data(f'{data_path}/{model_name}/n_model_W.pkl'), dtype=torch.float)
             
             W = torch.tensor(model_config['W'], dtype=torch.float, device=device)
             sigma = torch.tensor(model_config['sigma'], dtype=torch.float, device=device)

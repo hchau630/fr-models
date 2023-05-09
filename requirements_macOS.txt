@@ -1,4 +1,10 @@
-# development requirements
-twine
+# testing requirements
+hyclib[data]
+pytest
+pytest-benchmark
 
--e .[test]
+# development requirements
+build # for generating distribution package
+twine # for uploading package
+
+-e .

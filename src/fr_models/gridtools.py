@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from . import _torch
-import utils
+import hyclib as lib
 
 class Grid(torch.Tensor):
     def __new__(cls, *args, data=None, require_grads=False, **kwargs):
@@ -222,7 +222,7 @@ def meshgrid(tensors):
     M_afters = np.sum(Ms) - np.cumsum(Ms)
     Ns = [tensor.shape[-1] for tensor in tensors]
     shapes = [[1]*M_befores[i]+sizes[i]+[1]*M_afters[i]+[Ns[i]] for i, tensor in enumerate(tensors)]
-    expanded_tensors = [tensor.reshape(shapes[i]).expand(utils.itertools.flatten_seq(sizes)+[Ns[i]]) for i, tensor in enumerate(tensors)]
+    expanded_tensors = [tensor.reshape(shapes[i]).expand(lib.itertools.flatten_seq(sizes)+[Ns[i]]) for i, tensor in enumerate(tensors)]
     return expanded_tensors
 
 def slice_coord(tensor, i):

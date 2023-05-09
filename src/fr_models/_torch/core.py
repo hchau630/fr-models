@@ -5,7 +5,7 @@ import numpy as np
 
 from fr_models import gridtools
 
-import utils
+import hyclib as lib
 
 __all__ = ['linspace', 'take', 'pad', 'block', 'tensor', 'isclose', 'allclose', 'isequal', 'isconst', 'nanstd', 'stderr', 'nanstderr']
 
@@ -87,7 +87,7 @@ def isclose(x, y, rtol=1.0e-5, atol=1.0e-8):
 def allclose(*args, **kwargs):
     return isclose(*args, **kwargs).all()
 
-@utils.functools.deprecated
+@lib.functools.deprecated("_torch.isequal is deprecated, please use _torch.isconst instead.")
 def isequal(x, dim=-1, rtol=1.0e-5, atol=1.0e-8):
     x = x.moveaxis(dim,-1)
     return isclose(x[...,:-1], x[...,1:], rtol=rtol, atol=atol).all(dim=-1)

@@ -8,7 +8,7 @@ import pytest_benchmark.plugin
 from fr_models import analytic_models as amd
 from fr_models import response_models as rmd
 from fr_models import gridtools
-import utils
+import hyclib as lib
 
 @pytest.fixture
 def data_path(request):
@@ -36,7 +36,7 @@ def load_exp_data(filepath, x_cutoff=300.0, symmetric=False, normalize=None):
     return x_data.reshape(-1,1), y_data, y_data_sem
 
 def get_data(path):
-    data = utils.io.load_data(path)
+    data = lib.io.load_data(path)
     
     popt = data['popt']
     fit_options = data['meta']['fit_options']
@@ -141,7 +141,7 @@ def r_model_trained(request, data_path):
     responses_path = pathlib.Path(f'{data_path}/responses')
     filename = list(sorted(responses_path.glob('*.pkl')))[idx]
 
-    data = utils.io.load_data(filename)
+    data = lib.io.load_data(filename)
 
     model_data, exp_data = get_data(f"{data_path}/{data['path']}")
     W_pop, sigma_pop, amplitude, r_star, Ls, shape, w_dims = model_data
@@ -173,7 +173,7 @@ def trained_responses(request, data_path):
     responses_path = pathlib.Path(f'{data_path}/responses')
     filename = list(sorted(responses_path.glob('*.pkl')))[idx]
 
-    data = utils.io.load_data(filename)
+    data = lib.io.load_data(filename)
     
     return data['data']
 
