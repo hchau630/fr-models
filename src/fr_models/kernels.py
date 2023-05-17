@@ -293,3 +293,25 @@ class SumKernel(Kernel):
     def forward(self, x, y=0):
         return self.K1(x, y) + self.K2(x, y)
        
+class WeightedSumKernel(Kernel):
+    def __init__(self, K1, K2, w):
+        assert K1.F_shape == K2.F_shape
+        assert K1.D == K2.D
+        
+        super().__init__()
+        
+        self.K1 = K1
+        self.K2 = K2
+        self.w = w
+        
+    @property
+    def F_shape(self):
+        return self.K1.F_shape
+    
+    @property
+    def D(self):
+        return self.K1.D
+    
+    def forward(self, x, y=0):
+        return self.w * self.K1(x, y) + (1 - self.w) * self.K2(x, y)
+       
