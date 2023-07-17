@@ -32,7 +32,7 @@ class Kernel(abc.ABC, torch.nn.Module):
     def discretize(self, grid, use_symmetry=True, normalize=True):
         # check that grid is consistent with kernel
         assert grid.D == self.D # assert number of dimensions match
-        if len(grid.w_dims) > 0 or hasattr(self, 'w_dims'):
+        if len(grid.w_dims) > 0 and hasattr(self, 'w_dims'):
             assert grid.w_dims == self.w_dims
         
         if use_symmetry:

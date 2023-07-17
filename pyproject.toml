@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fr_models"
-version = "0.1.12"
+version = "0.1.13"
 description = "A python package for simulating and fitting firing rate models using PyTorch backend."
 readme = "README.md"
 requires-python = ">=3.9" # package developed with python v3.9.16
