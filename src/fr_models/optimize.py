@@ -250,7 +250,7 @@ class Optimizer():
                     y_pred = self.model(x)
                     
                 except (exceptions.NumericalModelError, exceptions.TimeoutError) as err:
-                    logger.debug(f"Caught exception inside compute_loss: {err}")
+                    logger.debug(f"Exception encountered when running model with params {self.params}: {err}")
                     
                     loss = torch.tensor(np.inf)
                     pure_loss_item = loss.item()
