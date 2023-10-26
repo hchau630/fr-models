@@ -23,7 +23,7 @@ dependencies = [
     'matplotlib',
     'scipy',
     'torch',
-    'torchdiffeq',
+    'torchdiffeq>=0.2.3',
     'hyclib>=0.1.15',
 ]
 
